@@ -5,7 +5,7 @@ import ta
 from datetime import datetime
 
 # ==============================
-# 🔐 TELEGRAM
+# 🔐 TELEGRAM (YOUR REAL VALUES)
 # ==============================
 BOT_TOKEN = "8745061783:AAFu0AGFMONUiEw3KAkZlDgzKSq2jBdW0Sc"
 CHAT_ID = "931982378"
@@ -28,7 +28,7 @@ coins = [
 ]
 
 # ==============================
-# 📊 GET DATA
+# 📊 GET MARKET DATA
 # ==============================
 def get_data(symbol):
     try:
@@ -53,11 +53,12 @@ def get_data(symbol):
 
         return df
 
-    except:
+    except Exception as e:
+        print("Data error:", e)
         return None
 
 # ==============================
-# 📈 PATTERN DETECTION (10 TYPES)
+# 📈 PATTERNS (10 TYPES)
 # ==============================
 def detect_patterns(df):
     highs = df["high"].values
@@ -66,61 +67,49 @@ def detect_patterns(df):
 
     patterns = []
 
-    # 1. Double Top
     if abs(highs[-1] - highs[-3]) < 0.3:
         patterns.append(("Double Top", 70))
 
-    # 2. Double Bottom
     if abs(lows[-1] - lows[-3]) < 0.3:
         patterns.append(("Double Bottom", 75))
 
-    # 3. Head & Shoulders
     if highs[-3] > highs[-2] and highs[-3] > highs[-4]:
         patterns.append(("Head & Shoulders", 80))
 
-    # 4. Inverse H&S
     if lows[-3] < lows[-2] and lows[-3] < lows[-4]:
         patterns.append(("Inverse Head & Shoulders", 82))
 
-    # 5. Ascending Triangle
     if highs[-1] <= highs[-2] and lows[-1] > lows[-2]:
         patterns.append(("Ascending Triangle", 78))
 
-    # 6. Descending Triangle
     if lows[-1] >= lows[-2] and highs[-1] < highs[-2]:
         patterns.append(("Descending Triangle", 78))
 
-    # 7. Bull Flag
     if closes[-1] > closes[-5] and closes[-2] < closes[-1]:
         patterns.append(("Bull Flag", 76))
 
-    # 8. Bear Flag
     if closes[-1] < closes[-5] and closes[-2] > closes[-1]:
         patterns.append(("Bear Flag", 76))
 
-    # 9. Breakout
     if closes[-1] > max(closes[-10:-1]):
         patterns.append(("Breakout", 85))
 
-    # 10. Breakdown
     if closes[-1] < min(closes[-10:-1]):
         patterns.append(("Breakdown", 85))
 
     if len(patterns) == 0:
         return ("No Pattern", 60)
 
-    # choose strongest
-    best = max(patterns, key=lambda x: x[1])
-    return best
+    return max(patterns, key=lambda x: x[1])
 
 # ==============================
-# 🧠 ANALYSIS ENGINE
+# 🧠 ANALYSIS
 # ==============================
 def analyze(df):
     try:
-        df["rsi"] = ta.momentum.RSIIndicator(df["close"]).rsi()
-        df["ema"] = ta.trend.EMAIndicator(df["close"], window=20).ema_indicator()
-        macd = ta.trend.MACD(df["close"])
+        df["rsi"] = ta.momentum.RSIIndicator(close=df["close"], window=14).rsi()
+        df["ema"] = ta.trend.EMAIndicator(close=df["close"], window=20).ema_indicator()
+        macd = ta.trend.MACD(close=df["close"])
         df["macd"] = macd.macd()
         df["macd_signal"] = macd.macd_signal()
 
@@ -132,11 +121,9 @@ def analyze(df):
         macd_val = last["macd"]
         macd_sig = last["macd_signal"]
 
-        pattern, pattern_score = detect_patterns(df)
+        pattern, score = detect_patterns(df)
 
         trend = "UP" if price > ema else "DOWN"
-
-        score = pattern_score
 
         if rsi < 40:
             score += 5
@@ -148,10 +135,7 @@ def analyze(df):
         else:
             score += 3
 
-        if trend == "UP":
-            signal = "BUY"
-        else:
-            signal = "SELL"
+        signal = "BUY" if trend == "UP" else "SELL"
 
         entry = round(price, 4)
         sl = round(price * 0.97, 4)
@@ -159,27 +143,35 @@ def analyze(df):
 
         return signal, entry, sl, tp, score, pattern
 
-    except:
+    except Exception as e:
+        print("Analysis error:", e)
         return None
 
 # ==============================
-# 🚀 BOT START
+# 🚀 START BOT
 # ==============================
 send("🚀 BOT STARTED - AI TRADING ENGINE LIVE")
 
 # ==============================
-# 🔁 LOOP
+# 🔁 MAIN LOOP (FIXED)
 # ==============================
 while True:
+    print("Checking market...")
+
     for coin in coins:
-        df = get_data(coin)
+        try:
+            df = get_data(coin)
 
-        if df is None:
-            continue
+            if df is None:
+                print(f"No data: {coin}")
+                continue
 
-        result = analyze(df)
+            result = analyze(df)
 
-        if result:
+            if result is None:
+                print(f"Analysis failed: {coin}")
+                continue
+
             signal, entry, sl, tp, score, pattern = result
 
             msg = f"""
@@ -197,5 +189,10 @@ while True:
 """
 
             send(msg)
+            print(f"✅ Signal sent: {coin}")
 
-    time.sleep(900)  # 15 minutes
+        except Exception as e:
+            print(f"❌ ERROR {coin}: {e}")
+
+    print("Sleeping 60 sec...\n")
+    time.sleep(60)
