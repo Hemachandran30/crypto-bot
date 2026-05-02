@@ -5,9 +5,9 @@ import ta
 from datetime import datetime
 
 # ==============================
-# 🔐 TELEGRAM (YOUR REAL TOKEN ADDED)
+# 🔐 TELEGRAM
 # ==============================
-BOT_TOKEN = "8745061783:AAFu0AGFM0NUIEw3KAkZIDgzKSq2jBdW0Sc"
+BOT_TOKEN = "8745061783:AAFu0AGFMONUiEw3KAkZlDgzKSq2jBdW0Sc"
 CHAT_ID = "931982378"
 
 def send(msg):
@@ -19,113 +19,144 @@ def send(msg):
         print("Telegram Error:", e)
 
 # ==============================
-# 🪙 COINS (10 coins)
+# COINS
 # ==============================
 coins = [
-    "BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "BNBUSDT",
-    "ADAUSDT", "DOGEUSDT", "MATICUSDT", "AVAXUSDT", "DOTUSDT"
+    "BTCUSDT","ETHUSDT","SOLUSDT","XRPUSDT",
+    "BNBUSDT","ADAUSDT","DOGEUSDT","MATICUSDT",
+    "AVAXUSDT","DOTUSDT"
 ]
 
 # ==============================
-# 📊 GET MARKET DATA
+# GET DATA
 # ==============================
 def get_data(symbol):
-    url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval=15m&limit=100"
-    res = requests.get(url).json()
+    try:
+        url = "https://api.binance.com/api/v3/klines"
+        params = {
+            "symbol": symbol,
+            "interval": "15m",
+            "limit": 100
+        }
 
-    if isinstance(res, list):
-        df = pd.DataFrame(res)
-        df = df[[0,1,2,3,4,5]]
-        df.columns = ["time","open","high","low","close","volume"]
+        data = requests.get(url, params=params).json()
+
+        if not isinstance(data, list):
+            return None
+
+        df = pd.DataFrame(data, columns=[
+            "time","open","high","low","close","volume",
+            "close_time","qav","trades","tbbav","tbqav","ignore"
+        ])
 
         df["close"] = df["close"].astype(float)
-        df["volume"] = df["volume"].astype(float)
+        df["high"] = df["high"].astype(float)
+        df["low"] = df["low"].astype(float)
 
         return df
-    return None
+
+    except:
+        return None
 
 # ==============================
-# 🧠 ANALYSIS
+# PATTERN DETECTION
+# ==============================
+def detect_pattern(df):
+    highs = df["high"].tail(10).values
+    lows = df["low"].tail(10).values
+
+    # Simple double top
+    if abs(highs[-1] - highs[-3]) < 0.3:
+        return "Double Top", 72
+
+    # Simple double bottom
+    if abs(lows[-1] - lows[-3]) < 0.3:
+        return "Double Bottom", 75
+
+    return "No Clear Pattern", 60
+
+# ==============================
+# ANALYSIS
 # ==============================
 def analyze(df):
     df["rsi"] = ta.momentum.RSIIndicator(df["close"]).rsi()
     df["ema"] = ta.trend.EMAIndicator(df["close"], window=20).ema_indicator()
 
-    price = df["close"].iloc[-1]
-    rsi = df["rsi"].iloc[-1]
-    ema = df["ema"].iloc[-1]
-    volume = df["volume"].iloc[-1]
+    last = df.iloc[-1]
+
+    price = last["close"]
+    rsi = last["rsi"]
+    ema = last["ema"]
 
     trend = "UP" if price > ema else "DOWN"
 
+    pattern, pattern_success = detect_pattern(df)
+
+    # LOGIC
     if trend == "UP" and rsi < 45:
         signal = "BUY"
-        confidence = round(70 + (45 - rsi), 2)
+        confidence = pattern_success + 5
     elif trend == "DOWN" and rsi > 55:
         signal = "SELL"
-        confidence = round(70 + (rsi - 55), 2)
+        confidence = pattern_success + 5
     else:
         return None
 
-    entry = price
+    entry = round(price, 4)
     sl = round(price * 0.97, 4)
     tp = round(price * 1.05, 4)
 
-    eta = "2-6 Hours"
-
     return {
         "signal": signal,
-        "price": price,
+        "price": entry,
         "rsi": round(rsi, 2),
-        "ema": round(ema, 2),
-        "volume": round(volume, 2),
         "trend": trend,
-        "entry": entry,
+        "pattern": pattern,
+        "pattern_success": pattern_success,
+        "confidence": confidence,
         "sl": sl,
         "tp": tp,
-        "confidence": confidence,
-        "eta": eta
+        "eta": "2-6 Hours"
     }
 
 # ==============================
-# 🚀 MAIN LOOP
+# START
 # ==============================
-send("🚀 BOT STARTED — Monitoring Market")
+send("🚀 BOT STARTED — AI TRADING ENGINE ACTIVE")
 
+# ==============================
+# LOOP (2 HOURS)
+# ==============================
 while True:
     print("Checking market...")
 
     for coin in coins:
-        try:
-            df = get_data(coin)
+        df = get_data(coin)
 
-            if df is None:
-                print("No data:", coin)
-                continue
+        if df is None:
+            print("No data:", coin)
+            continue
 
-            result = analyze(df)
+        result = analyze(df)
 
-            if result:
-                msg = f"""
-🔥 {coin} SIGNAL
+        if result:
+            msg = f"""
+🔥 {coin} TRADE SIGNAL
 
-Type: {result['signal']}
-Trend: {result['trend']}
-RSI: {result['rsi']}
-EMA: {result['ema']}
+📈 Type: {result['signal']}
+📊 Trend: {result['trend']}
+🔍 Pattern: {result['pattern']}
+📊 Pattern Success: {result['pattern_success']}%
 
-📍 Entry: {result['entry']}
-🎯 Take Profit: {result['tp']}
+📍 Entry: {result['price']}
 🛑 Stop Loss: {result['sl']}
+🎯 Take Profit: {result['tp']}
 
 📊 Confidence: {result['confidence']}%
 ⏱ ETA: {result['eta']}
+🕒 Time: {datetime.now().strftime('%H:%M')}
 """
-                send(msg)
+            send(msg)
 
-        except Exception as e:
-            print("Error:", coin, e)
-
-    send("✅ Bot Running — Next check in 2 hours")
-
+    send("✅ Bot running — next scan in 2 hours")
     time.sleep(7200)
