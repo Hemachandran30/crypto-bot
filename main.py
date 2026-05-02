@@ -16,33 +16,23 @@ def send(msg):
         print("Telegram Error:", e)
 
 coins = [
-    "BTCUSDT","ETHUSDT","SOLUSDT","XRPUSDT",
-    "BNBUSDT","ADAUSDT","DOGEUSDT","MATICUSDT",
-    "AVAXUSDT","DOTUSDT"
+    "bitcoin", "ethereum", "solana", "ripple",
+    "binancecoin", "cardano", "dogecoin",
+    "matic-network", "avalanche-2", "polkadot"
 ]
 
-# ✅ FIXED DATA FUNCTION
-def get_data(symbol):
+# ✅ COINGECKO (NO BLOCK)
+def get_price(coin):
     try:
-        url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval=15m&limit=100"
-
-        res = requests.get(url, timeout=10)
-
-        if res.status_code != 200:
-            print("API ERROR:", res.text)
-            return None
-
+        url = f"https://api.coingecko.com/api/v3/coins/{coin}/market_chart?vs_currency=usd&days=1"
+        res = requests.get(url)
         data = res.json()
 
-        if not isinstance(data, list) or len(data) == 0:
-            print("Empty data:", symbol)
-            return None
+        prices = [p[1] for p in data["prices"]]
 
-        df = pd.DataFrame(data)
-
-        df["close"] = df[4].astype(float)
-        df["high"] = df[2].astype(float)
-        df["low"] = df[3].astype(float)
+        df = pd.DataFrame(prices, columns=["close"])
+        df["high"] = df["close"]
+        df["low"] = df["close"]
 
         return df
 
@@ -51,29 +41,21 @@ def get_data(symbol):
         return None
 
 def detect_patterns(df):
-    highs = df["high"].values
-    lows = df["low"].values
     closes = df["close"].values
 
     patterns = []
-
-    if abs(highs[-1] - highs[-3]) < 0.3:
-        patterns.append(("Double Top", 70))
-
-    if abs(lows[-1] - lows[-3]) < 0.3:
-        patterns.append(("Double Bottom", 75))
-
-    if highs[-3] > highs[-2] and highs[-3] > highs[-4]:
-        patterns.append(("Head & Shoulders", 80))
-
-    if lows[-3] < lows[-2] and lows[-3] < lows[-4]:
-        patterns.append(("Inverse Head & Shoulders", 82))
 
     if closes[-1] > max(closes[-10:-1]):
         patterns.append(("Breakout", 85))
 
     if closes[-1] < min(closes[-10:-1]):
         patterns.append(("Breakdown", 85))
+
+    if closes[-1] > closes[-2] > closes[-3]:
+        patterns.append(("Strong Uptrend", 80))
+
+    if closes[-1] < closes[-2] < closes[-3]:
+        patterns.append(("Strong Downtrend", 80))
 
     if len(patterns) == 0:
         return ("No Pattern", 60)
@@ -111,7 +93,7 @@ while True:
     print("Checking market...")
 
     for coin in coins:
-        df = get_data(coin)
+        df = get_price(coin)
 
         if df is None:
             continue
@@ -122,7 +104,7 @@ while True:
             signal, entry, sl, tp, score, pattern = result
 
             msg = f"""
-📊 {coin}
+📊 {coin.upper()}
 
 📢 Signal: {signal}
 💰 Entry: {entry}
