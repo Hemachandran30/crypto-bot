@@ -19,7 +19,7 @@ def send(msg):
         print("Telegram Error:", e)
 
 # ==============================
-# COINS
+# 💰 COINS
 # ==============================
 coins = [
     "BTCUSDT","ETHUSDT","SOLUSDT","XRPUSDT",
@@ -28,20 +28,18 @@ coins = [
 ]
 
 # ==============================
-# GET DATA
+# 📊 GET DATA
 # ==============================
 def get_data(symbol):
     try:
         url = "https://api.binance.com/api/v3/klines"
-        params = {
-            "symbol": symbol,
-            "interval": "15m",
-            "limit": 100
-        }
+        params = {"symbol": symbol, "interval": "15m", "limit": 120}
+        headers = {"User-Agent": "Mozilla/5.0"}
 
-        data = requests.get(url, params=params).json()
+        res = requests.get(url, params=params, headers=headers, timeout=10)
+        data = res.json()
 
-        if not isinstance(data, list):
+        if not isinstance(data, list) or len(data) == 0:
             return None
 
         df = pd.DataFrame(data, columns=[
@@ -59,104 +57,145 @@ def get_data(symbol):
         return None
 
 # ==============================
-# PATTERN DETECTION
+# 📈 PATTERN DETECTION (10 TYPES)
 # ==============================
-def detect_pattern(df):
-    highs = df["high"].tail(10).values
-    lows = df["low"].tail(10).values
+def detect_patterns(df):
+    highs = df["high"].values
+    lows = df["low"].values
+    closes = df["close"].values
 
-    # Simple double top
+    patterns = []
+
+    # 1. Double Top
     if abs(highs[-1] - highs[-3]) < 0.3:
-        return "Double Top", 72
+        patterns.append(("Double Top", 70))
 
-    # Simple double bottom
+    # 2. Double Bottom
     if abs(lows[-1] - lows[-3]) < 0.3:
-        return "Double Bottom", 75
+        patterns.append(("Double Bottom", 75))
 
-    return "No Clear Pattern", 60
+    # 3. Head & Shoulders
+    if highs[-3] > highs[-2] and highs[-3] > highs[-4]:
+        patterns.append(("Head & Shoulders", 80))
+
+    # 4. Inverse H&S
+    if lows[-3] < lows[-2] and lows[-3] < lows[-4]:
+        patterns.append(("Inverse Head & Shoulders", 82))
+
+    # 5. Ascending Triangle
+    if highs[-1] <= highs[-2] and lows[-1] > lows[-2]:
+        patterns.append(("Ascending Triangle", 78))
+
+    # 6. Descending Triangle
+    if lows[-1] >= lows[-2] and highs[-1] < highs[-2]:
+        patterns.append(("Descending Triangle", 78))
+
+    # 7. Bull Flag
+    if closes[-1] > closes[-5] and closes[-2] < closes[-1]:
+        patterns.append(("Bull Flag", 76))
+
+    # 8. Bear Flag
+    if closes[-1] < closes[-5] and closes[-2] > closes[-1]:
+        patterns.append(("Bear Flag", 76))
+
+    # 9. Breakout
+    if closes[-1] > max(closes[-10:-1]):
+        patterns.append(("Breakout", 85))
+
+    # 10. Breakdown
+    if closes[-1] < min(closes[-10:-1]):
+        patterns.append(("Breakdown", 85))
+
+    if len(patterns) == 0:
+        return ("No Pattern", 60)
+
+    # choose strongest
+    best = max(patterns, key=lambda x: x[1])
+    return best
 
 # ==============================
-# ANALYSIS
+# 🧠 ANALYSIS ENGINE
 # ==============================
 def analyze(df):
-    df["rsi"] = ta.momentum.RSIIndicator(df["close"]).rsi()
-    df["ema"] = ta.trend.EMAIndicator(df["close"], window=20).ema_indicator()
+    try:
+        df["rsi"] = ta.momentum.RSIIndicator(df["close"]).rsi()
+        df["ema"] = ta.trend.EMAIndicator(df["close"], window=20).ema_indicator()
+        macd = ta.trend.MACD(df["close"])
+        df["macd"] = macd.macd()
+        df["macd_signal"] = macd.macd_signal()
 
-    last = df.iloc[-1]
+        last = df.iloc[-1]
 
-    price = last["close"]
-    rsi = last["rsi"]
-    ema = last["ema"]
+        price = last["close"]
+        rsi = last["rsi"]
+        ema = last["ema"]
+        macd_val = last["macd"]
+        macd_sig = last["macd_signal"]
 
-    trend = "UP" if price > ema else "DOWN"
+        pattern, pattern_score = detect_patterns(df)
 
-    pattern, pattern_success = detect_pattern(df)
+        trend = "UP" if price > ema else "DOWN"
 
-    # LOGIC
-    if trend == "UP" and rsi < 45:
-        signal = "BUY"
-        confidence = pattern_success + 5
-    elif trend == "DOWN" and rsi > 55:
-        signal = "SELL"
-        confidence = pattern_success + 5
-    else:
+        score = pattern_score
+
+        if rsi < 40:
+            score += 5
+        if rsi > 60:
+            score += 5
+
+        if macd_val > macd_sig:
+            score += 5
+        else:
+            score += 3
+
+        if trend == "UP":
+            signal = "BUY"
+        else:
+            signal = "SELL"
+
+        entry = round(price, 4)
+        sl = round(price * 0.97, 4)
+        tp = round(price * 1.05, 4)
+
+        return signal, entry, sl, tp, score, pattern
+
+    except:
         return None
 
-    entry = round(price, 4)
-    sl = round(price * 0.97, 4)
-    tp = round(price * 1.05, 4)
-
-    return {
-        "signal": signal,
-        "price": entry,
-        "rsi": round(rsi, 2),
-        "trend": trend,
-        "pattern": pattern,
-        "pattern_success": pattern_success,
-        "confidence": confidence,
-        "sl": sl,
-        "tp": tp,
-        "eta": "2-6 Hours"
-    }
+# ==============================
+# 🚀 BOT START
+# ==============================
+send("🚀 BOT STARTED - AI TRADING ENGINE LIVE")
 
 # ==============================
-# START
-# ==============================
-send("🚀 BOT STARTED — AI TRADING ENGINE ACTIVE")
-
-# ==============================
-# LOOP (2 HOURS)
+# 🔁 LOOP
 # ==============================
 while True:
-    print("Checking market...")
-
     for coin in coins:
         df = get_data(coin)
 
         if df is None:
-            print("No data:", coin)
             continue
 
         result = analyze(df)
 
         if result:
+            signal, entry, sl, tp, score, pattern = result
+
             msg = f"""
-🔥 {coin} TRADE SIGNAL
+📊 {coin}
 
-📈 Type: {result['signal']}
-📊 Trend: {result['trend']}
-🔍 Pattern: {result['pattern']}
-📊 Pattern Success: {result['pattern_success']}%
+📢 Signal: {signal}
+💰 Entry: {entry}
+🎯 TP: {tp}
+🛑 SL: {sl}
 
-📍 Entry: {result['price']}
-🛑 Stop Loss: {result['sl']}
-🎯 Take Profit: {result['tp']}
+🧠 Pattern: {pattern}
+📈 Confidence: {score}%
 
-📊 Confidence: {result['confidence']}%
-⏱ ETA: {result['eta']}
-🕒 Time: {datetime.now().strftime('%H:%M')}
+⏱ Time: {datetime.now().strftime('%H:%M:%S')}
 """
+
             send(msg)
 
-    send("✅ Bot running — next scan in 2 hours")
-    time.sleep(7200)
+    time.sleep(900)  # 15 minutes
