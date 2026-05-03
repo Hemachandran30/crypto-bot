@@ -2,10 +2,12 @@ import requests
 import time
 import pandas as pd
 import ta
-import random
 from datetime import datetime
 
-BOT_TOKEN = "8745061783:AAHqYr6pE7DRamJssybX_iyMmro7V_gSgrI"
+# =============================
+# TELEGRAM (UPDATED TOKEN)
+# =============================
+BOT_TOKEN = "8745061783:AAGNKaGg0XhhFr-SaaKQsaSV0f04fhExgqQ"
 CHAT_ID = "931982378"
 
 def send(msg):
@@ -16,10 +18,16 @@ def send(msg):
     except Exception as e:
         print("Telegram Error:", e)
 
+# =============================
+# SETTINGS
+# =============================
 INTERVAL = 7200
 active_trades = {}
 sent_signals = set()
 
+# =============================
+# COINS (FULL LIST)
+# =============================
 coins = [
 "bitcoin","ethereum","solana","ripple","binancecoin","cardano",
 "dogecoin","tron","polkadot","matic-network","avalanche-2",
@@ -32,6 +40,9 @@ coins = [
 
 symbol_map = {c: c.upper()[:5] for c in coins}
 
+# =============================
+# DATA (COINGECKO)
+# =============================
 def get_data(coin, days):
     try:
         url = f"https://api.coingecko.com/api/v3/coins/{coin}/market_chart"
@@ -43,7 +54,7 @@ def get_data(coin, days):
         return None
 
 # =============================
-# PATTERN ENGINE
+# PATTERNS
 # =============================
 def detect_patterns(df):
     c = df["close"]
@@ -70,19 +81,12 @@ def detect_patterns(df):
     return sorted(patterns, key=lambda x: x[1], reverse=True)[:3]
 
 # =============================
-# ETA LOGIC (NEW — IMPORTANT)
+# ETA LOGIC
 # =============================
 def calculate_eta(tf, momentum, pattern_score):
-    if tf == "15m":
-        base = 20
-    elif tf == "30m":
-        base = 45
-    elif tf == "1h":
-        base = 90
-    else:
-        base = 180
+    base_map = {"15m":20,"30m":45,"1h":90,"2h":180}
+    base = base_map.get(tf, 60)
 
-    # Adjust by momentum + pattern strength
     if momentum > 0:
         base *= 0.7
     if pattern_score > 85:
@@ -152,7 +156,6 @@ def analyze(df):
         "pattern_success": pattern_score,
         "trade_success": trade_success,
         "rsi": rsi,
-        "patterns": patterns,
         "momentum": momentum
     }
 
@@ -180,8 +183,6 @@ def multi_tf(coin):
         return None
 
     best = max(results, key=lambda x: x["trade_success"])
-
-    # ETA calculation added here
     best["eta"] = calculate_eta(best["tf"], best["momentum"], best["pattern_success"])
 
     return best
@@ -189,7 +190,7 @@ def multi_tf(coin):
 # =============================
 # START
 # =============================
-send("🚀 BOT STARTED SUCCESSFULLY WITH ETA")
+send("🚀 BOT STARTED SUCCESSFULLY")
 
 # =============================
 # LOOP
@@ -203,8 +204,8 @@ while True:
             continue
 
         symbol = symbol_map.get(coin, coin)
-
         key = f"{symbol}_{res['signal']}"
+
         if key in sent_signals:
             continue
         sent_signals.add(key)
