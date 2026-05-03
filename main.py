@@ -10,7 +10,7 @@ from datetime import datetime
 CMC_API_KEY = "695de55737564709a7b0176202c7d542"
 
 TELEGRAM_TOKEN = "8745061783:AAHqJQSq115g6DSbgiOn7Enx_nzoLDZngjE"
-CHAT_ID = "938928738"  # From your getUpdates
+CHAT_ID = "938928738"
 
 CMC_URL = "https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest"
 
@@ -24,10 +24,6 @@ COINS = [
 ]
 
 TIMEFRAMES = ["15m", "30m", "1h", "2h"]
-
-# =========================
-# 📊 PATTERN ENGINE (20+)
-# =========================
 
 PATTERNS = [
     "EMA Bullish", "EMA Bearish",
@@ -47,27 +43,41 @@ PATTERNS = [
 # =========================
 
 def send_telegram(msg):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    requests.post(url, data={"chat_id": CHAT_ID, "text": msg})
+    try:
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+        requests.post(url, data={"chat_id": CHAT_ID, "text": msg})
+    except Exception as e:
+        print("Telegram error:", e)
 
 # =========================
-# 📊 DATA FETCH
+# 📊 DATA FETCH (FIXED)
 # =========================
 
 def get_prices():
-    params = {"symbol": ",".join(COINS)}
-    res = requests.get(CMC_URL, headers=HEADERS, params=params).json()
-    return res["data"]
+    try:
+        params = {"symbol": ",".join(COINS)}
+        res = requests.get(CMC_URL, headers=HEADERS, params=params)
+        data = res.json()
+
+        if "data" not in data:
+            print("CMC API issue:", data)
+            return {}
+
+        return data["data"]
+
+    except Exception as e:
+        print("Fetch error:", e)
+        return {}
 
 # =========================
-# 🧠 LOGIC ENGINE
+# 🧠 SIGNAL LOGIC (UNCHANGED)
 # =========================
 
 def generate_signal(price):
     direction = random.choice(["BUY", "SELL"])
     leverage = random.randint(3, 15)
 
-    move_needed = random.uniform(2, 3)  # %
+    move_needed = random.uniform(2, 3)
     profit = round(move_needed * leverage, 2)
 
     entry = price
@@ -96,7 +106,7 @@ def generate_signal(price):
     }
 
 # =========================
-# 🚀 MAIN ENGINE
+# 🚀 MAIN LOOP (FIXED ONLY)
 # =========================
 
 last_signal_time = 0
@@ -108,24 +118,40 @@ while True:
     try:
         data = get_prices()
 
-        # 🔁 CONTINUOUS SCAN
+        if not data:
+            time.sleep(10)
+            continue
+
         market_signals = []
 
         for coin in COINS:
-            price = data[coin]["quote"]["USD"]["price"]
+            try:
+                coin_data = data.get(coin)
 
-            signal = generate_signal(price)
+                if not coin_data:
+                    continue
 
-            # Avoid duplicate
-            if coin in sent_signals:
+                price = coin_data["quote"]["USD"]["price"]
+
+                # ✅ FIX: skip invalid price
+                if price is None:
+                    continue
+
+                signal = generate_signal(price)
+
+                if coin in sent_signals:
+                    continue
+
+                market_signals.append((coin, signal))
+
+            except Exception as e:
+                print(f"Skipping {coin}:", e)
                 continue
-
-            market_signals.append((coin, signal))
 
         # ⏱ SEND SIGNAL EVERY 1 HOUR
         if time.time() - last_signal_time > 3600:
 
-            for coin, s in market_signals[:5]:  # top 5 signals only
+            for coin, s in market_signals[:5]:
 
                 msg = f"""
 📊 {coin}
@@ -153,8 +179,8 @@ while True:
 
             last_signal_time = time.time()
 
-        time.sleep(30)  # ✅ small delay (NOT sleep 1 hour)
+        time.sleep(30)  # ✅ still continuous
 
     except Exception as e:
-        print("Error:", e)
+        print("Main loop error:", e)
         time.sleep(10)
