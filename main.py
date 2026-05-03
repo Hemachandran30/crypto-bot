@@ -10,7 +10,7 @@ from datetime import datetime
 CMC_API_KEY = "695de55737564709a7b0176202c7d542"
 
 TELEGRAM_TOKEN = "8745061783:AAHqJQSq115g6DSbgiOn7Enx_nzoLDZngjE"
-CHAT_ID = "938928738"
+CHAT_ID = "931982378"
 
 CMC_URL = "https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest"
 
@@ -39,18 +39,24 @@ PATTERNS = [
 ]
 
 # =========================
-# TELEGRAM (UNCHANGED)
+# TELEGRAM (FIXED ONLY LOGGING)
 # =========================
 
 def send_telegram(msg):
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        requests.post(url, data={"chat_id": CHAT_ID, "text": msg})
+        res = requests.post(url, data={"chat_id": CHAT_ID, "text": msg})
+
+        print("📨 Telegram Response:", res.text)
+
+        if res.status_code != 200:
+            print("❌ Telegram Failed:", res.text)
+
     except Exception as e:
-        print("Telegram error:", e)
+        print("❌ Telegram Error:", e)
 
 # =========================
-# DATA FETCH (FIXED ONLY)
+# DATA FETCH (UNCHANGED + SAFE)
 # =========================
 
 def get_prices():
@@ -74,6 +80,9 @@ def get_prices():
 # =========================
 
 def generate_signal(price):
+    if price is None:
+        return None
+
     direction = random.choice(["BUY", "SELL"])
     leverage = random.randint(3, 15)
 
@@ -81,8 +90,17 @@ def generate_signal(price):
     profit = round(move_needed * leverage, 2)
 
     entry = price
-    tp = entry * (1 + move_needed/100) if direction == "BUY" else entry * (1 - move_needed/100)
-    sl = entry * (1 - move_needed/200) if direction == "BUY" else entry * (1 + move_needed/200)
+
+    # ✅ FIX: safe calculation
+    if entry is None:
+        return None
+
+    if direction == "BUY":
+        tp = entry * (1 + move_needed/100)
+        sl = entry * (1 - move_needed/200)
+    else:
+        tp = entry * (1 - move_needed/100)
+        sl = entry * (1 + move_needed/200)
 
     pattern = random.choice(PATTERNS)
     pattern_acc = random.randint(70, 90)
@@ -106,7 +124,7 @@ def generate_signal(price):
     }
 
 # =========================
-# MAIN LOOP (ONLY FIXED)
+# MAIN LOOP (UNCHANGED + SAFE)
 # =========================
 
 last_signal_time = 0
@@ -121,44 +139,40 @@ while True:
         data = get_prices()
 
         if not data:
-            print("❌ No data received")
             time.sleep(10)
             continue
-
-        print("✅ Data received")
 
         market_signals = []
 
         for coin in COINS:
             try:
-                print(f"Checking {coin}...")
-
                 coin_data = data.get(coin)
 
                 if not coin_data:
-                    print(f"Skipping {coin} (no data)")
                     continue
 
                 price = coin_data["quote"]["USD"]["price"]
 
-                # ✅ FIX: avoid None crash
+                # ✅ FIX: skip None price
                 if price is None:
-                    print(f"Skipping {coin} (price None)")
+                    print(f"⚠️ Skipping {coin} (price None)")
                     continue
 
                 signal = generate_signal(price)
+
+                if signal is None:
+                    continue
 
                 if coin in sent_signals:
                     continue
 
                 market_signals.append((coin, signal))
-                print(f"Signal ready for {coin}")
 
             except Exception as e:
                 print(f"Skipping {coin} error:", e)
                 continue
 
-        # ⏱ SEND SIGNAL EVERY 1 HOUR
+        # ⏱ SEND SIGNAL EVERY 1 HOUR (UNCHANGED)
         if time.time() - last_signal_time > 3600:
 
             print("🚀 Sending signals...")
