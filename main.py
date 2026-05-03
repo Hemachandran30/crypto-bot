@@ -4,7 +4,7 @@ import random
 from datetime import datetime
 
 # =========================
-# 🔐 CONFIG
+# CONFIG (UNCHANGED)
 # =========================
 
 CMC_API_KEY = "695de55737564709a7b0176202c7d542"
@@ -39,7 +39,7 @@ PATTERNS = [
 ]
 
 # =========================
-# 📡 TELEGRAM
+# TELEGRAM (UNCHANGED)
 # =========================
 
 def send_telegram(msg):
@@ -50,7 +50,7 @@ def send_telegram(msg):
         print("Telegram error:", e)
 
 # =========================
-# 📊 DATA FETCH (FIXED)
+# DATA FETCH (FIXED ONLY)
 # =========================
 
 def get_prices():
@@ -70,7 +70,7 @@ def get_prices():
         return {}
 
 # =========================
-# 🧠 SIGNAL LOGIC (UNCHANGED)
+# SIGNAL LOGIC (UNCHANGED)
 # =========================
 
 def generate_signal(price):
@@ -106,7 +106,7 @@ def generate_signal(price):
     }
 
 # =========================
-# 🚀 MAIN LOOP (FIXED ONLY)
+# MAIN LOOP (ONLY FIXED)
 # =========================
 
 last_signal_time = 0
@@ -116,25 +116,34 @@ send_telegram("🚀 BOT STARTED - LIVE SCANNING 24/7")
 
 while True:
     try:
+        print("🔁 Scanning market...", datetime.now())
+
         data = get_prices()
 
         if not data:
+            print("❌ No data received")
             time.sleep(10)
             continue
+
+        print("✅ Data received")
 
         market_signals = []
 
         for coin in COINS:
             try:
+                print(f"Checking {coin}...")
+
                 coin_data = data.get(coin)
 
                 if not coin_data:
+                    print(f"Skipping {coin} (no data)")
                     continue
 
                 price = coin_data["quote"]["USD"]["price"]
 
-                # ✅ FIX: skip invalid price
+                # ✅ FIX: avoid None crash
                 if price is None:
+                    print(f"Skipping {coin} (price None)")
                     continue
 
                 signal = generate_signal(price)
@@ -143,13 +152,16 @@ while True:
                     continue
 
                 market_signals.append((coin, signal))
+                print(f"Signal ready for {coin}")
 
             except Exception as e:
-                print(f"Skipping {coin}:", e)
+                print(f"Skipping {coin} error:", e)
                 continue
 
         # ⏱ SEND SIGNAL EVERY 1 HOUR
         if time.time() - last_signal_time > 3600:
+
+            print("🚀 Sending signals...")
 
             for coin, s in market_signals[:5]:
 
@@ -171,7 +183,7 @@ while True:
 ⏱ Timeframe: {s['tf']}
 ⌛ ETA: {s['eta']}
 
-🕒 Signal Time: {datetime.now().strftime('%H:%M:%S')}
+🕒 Time: {datetime.now().strftime('%H:%M:%S')}
 """
 
                 send_telegram(msg)
@@ -179,7 +191,7 @@ while True:
 
             last_signal_time = time.time()
 
-        time.sleep(30)  # ✅ still continuous
+        time.sleep(30)
 
     except Exception as e:
         print("Main loop error:", e)
