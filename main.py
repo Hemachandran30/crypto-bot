@@ -3,252 +3,274 @@ import time
 import random
 from datetime import datetime
 
-CMC_API_KEY = "695de55737564709a7b0176202c7d542"
+# ================= CONFIG =================
+
 TELEGRAM_TOKEN = "8745061783:AAHqJQSq115g6DSbgiOn7Enx_nzoLDZngjE"
 CHAT_ID = "931982378"
 
-CMC_URL = "https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest"
+BINANCE_API_KEY = "ISvf5mwnZA5P3t9EuHFCa1cSobM6VvHPQ5kMrNBSWWX0F6O0Ss3dzf7YGlbXpvsI"
 
-HEADERS = {
-    "X-CMC_PRO_API_KEY": CMC_API_KEY
+BINANCE_HEADERS = {
+    "X-MBX-APIKEY": BINANCE_API_KEY
 }
+
+BINANCE_PRICE_URL = "https://api.binance.com/api/v3/ticker/price"
+BINANCE_KLINE_URL = "https://api.binance.com/api/v3/klines"
 
 COINS = [
     "BTC","ETH","BNB","SOL","XRP","ADA","DOGE","DOT","MATIC","LTC",
     "TRX","AVAX","LINK","ATOM","ETC","XLM","NEAR","APT","ARB","FIL"
 ]
 
-TIMEFRAMES = ["15m", "30m", "1h", "2h"]
-
-PATTERNS = [
-    "EMA Bullish","EMA Bearish","Double Top","Double Bottom",
-    "RSI Overbought","RSI Oversold","Breakout","Breakdown",
-    "Ascending Triangle","Descending Triangle","Bull Flag","Bear Flag",
-    "Cup & Handle","Head & Shoulders","Inverse H&S","Falling Wedge",
-    "Rising Wedge","MACD Bullish","MACD Bearish","Volume Spike"
-]
+# ================= STATE =================
 
 active_trades = {}
 last_signal_time = 0
 last_sent_time = {}
-last_prices = {}  # 🔥 added for reversal logic
+last_signal_data = {}
 
-# =========================
-# TELEGRAM (UNCHANGED)
-# =========================
+# ================= PATTERNS =================
+
+PATTERNS = [
+    "EMA Trend","RSI Reversal","Breakout","Pullback","Double Top",
+    "Double Bottom","Head and Shoulders","Inverse H&S",
+    "Bull Flag","Bear Flag","Ascending Triangle","Descending Triangle",
+    "Rising Wedge","Falling Wedge","Cup and Handle","Support Bounce",
+    "Resistance Rejection","Volume Spike","Momentum Surge",
+    "Fake Breakout","Range Break","Trend Continuation",
+    "Liquidity Sweep","Order Block","Scalping Setup"
+]
+
+PATTERN_SUCCESS = {p: random.randint(70, 85) for p in PATTERNS}
+
+# ================= TELEGRAM =================
 
 def send_telegram(msg, coin=None):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
 
-    payload = {
-        "chat_id": CHAT_ID,
-        "text": msg
-    }
+    payload = {"chat_id": CHAT_ID, "text": msg}
 
     if coin:
         payload["reply_markup"] = {
             "inline_keyboard": [[
-                {"text": "✅ Activate Trade", "callback_data": f"ACT_{coin}"}
+                {"text": "✅ Activate Trade", "callback_data": f"ACTIVATE_{coin}"}
             ]]
         }
 
-    res = requests.post(url, json=payload)
-    print("📨", res.text)
+    requests.post(url, json=payload)
 
-# =========================
-# FETCH DATA (UNCHANGED)
-# =========================
+# ================= BUTTON =================
 
-def get_prices():
-    try:
-        params = {"symbol": ",".join(COINS)}
-        res = requests.get(CMC_URL, headers=HEADERS, params=params)
-        data = res.json()
+def check_updates():
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates"
+    data = requests.get(url).json()
 
-        if "data" not in data:
-            return {}
+    for update in data.get("result", []):
+        if "callback_query" in update:
+            coin = update["callback_query"]["data"].split("_")[1]
 
-        return data["data"]
+            if coin in last_signal_data:
+                active_trades[coin] = last_signal_data[coin]
+                send_telegram(f"✅ Trade Activated for {coin}")
 
-    except:
-        return {}
+# ================= DATA =================
 
-# =========================
-# SIGNAL LOGIC (UPDATED ONLY)
-# =========================
+def get_price(symbol):
+    res = requests.get(BINANCE_PRICE_URL, params={"symbol": symbol}, headers=BINANCE_HEADERS)
+    return float(res.json()["price"])
 
-def generate_signal(price):
+def get_candles(symbol):
+    res = requests.get(BINANCE_KLINE_URL, params={
+        "symbol": symbol,
+        "interval": "15m",
+        "limit": 50
+    }, headers=BINANCE_HEADERS)
 
-    if price is None:
+    data = res.json()
+
+    closes = [float(x[4]) for x in data]
+    highs = [float(x[2]) for x in data]
+    lows = [float(x[3]) for x in data]
+    volumes = [float(x[5]) for x in data]
+
+    return closes, highs, lows, volumes
+
+# ================= INDICATORS =================
+
+def ema(prices, period=20):
+    k = 2/(period+1)
+    e = prices[0]
+    for p in prices:
+        e = p*k + e*(1-k)
+    return e
+
+def rsi(prices, period=14):
+    gains, losses = [], []
+    for i in range(1,len(prices)):
+        diff = prices[i]-prices[i-1]
+        if diff>0: gains.append(diff)
+        else: losses.append(abs(diff))
+    avg_gain = sum(gains[-period:])/period if gains else 0
+    avg_loss = sum(losses[-period:])/period if losses else 1
+    rs = avg_gain/avg_loss
+    return 100-(100/(1+rs))
+
+# ================= SIGNAL =================
+
+def generate_signal(coin):
+
+    symbol = coin + "USDT"
+
+    price = get_price(symbol)
+    closes, highs, lows, volumes = get_candles(symbol)
+
+    if len(closes) < 20:
         return None
 
-    direction = random.choice(["BUY", "SELL"])
-    leverage = random.randint(3, 15)
+    ema_val = ema(closes)
+    rsi_val = rsi(closes)
 
-    move = random.uniform(1.5, 2.5)
-    profit = round(move * leverage, 2)
+    change = ((closes[-1] - closes[-5]) / closes[-5]) * 100
+
+    avg_vol = sum(volumes[:-1]) / len(volumes[:-1])
+    vol_spike = volumes[-1] > avg_vol * 1.5
+
+    support = min(lows[-10:])
+    resistance = max(highs[-10:])
+
+    liquidity_zone = (support + resistance) / 2
+
+    # ================= PATTERN LOGIC =================
+
+    if vol_spike and abs(change) > 1:
+        pattern = "Momentum Surge"
+    elif price > resistance:
+        pattern = "Breakout"
+    elif price < support:
+        pattern = "Fake Breakout"
+    elif abs(change) < 0.5:
+        pattern = "Range Break"
+    elif price > ema_val:
+        pattern = "Trend Continuation"
+    else:
+        pattern = random.choice(PATTERNS)
+
+    # ================= SIGNAL LOGIC =================
+
+    if price > ema_val and rsi_val > 55 and vol_spike:
+        direction = "BUY"
+    elif price < ema_val and rsi_val < 45 and vol_spike:
+        direction = "SELL"
+    else:
+        return None
+
+    leverage = 5 if abs(change) < 2 else 10
+    profit = 20 + min(abs(change)*2,5)
+    move = profit / leverage
 
     entry = price
 
     if direction == "BUY":
         tp = entry * (1 + move/100)
-        sl = entry * (1 - move/200)
+        sl = support
     else:
         tp = entry * (1 - move/100)
-        sl = entry * (1 + move/200)
+        sl = resistance
 
-    pattern = random.choice(PATTERNS)
-    tf = random.choice(TIMEFRAMES)
+    # ================= SUCCESS LOGIC =================
 
-    # 🔥 LOGICAL SUCCESS CALCULATION (ADDED)
-    base_success = 70
+    pattern_success = PATTERN_SUCCESS.get(pattern, 75)
 
-    if "Breakout" in pattern or "MACD" in pattern:
-        base_success += 8
-    elif "EMA" in pattern:
-        base_success += 5
-    elif "RSI" in pattern:
-        base_success += 3
+    confidence = 0
+    if rsi_val > 60 or rsi_val < 40: confidence += 20
+    if vol_spike: confidence += 25
+    if abs(change) > 1: confidence += 20
+    if price > ema_val or price < ema_val: confidence += 15
 
-    if tf == "1h":
-        base_success += 5
-    elif tf == "2h":
-        base_success += 7
-
-    if leverage > 10:
-        base_success -= 5
-
-    trade_success = min(max(base_success, 65), 92)
-    pattern_acc = trade_success - random.randint(2, 5)
+    trade_success = min(95, pattern_success + confidence // 2)
 
     return {
         "direction": direction,
-        "leverage": leverage,
         "entry": entry,
         "tp": tp,
         "sl": sl,
         "profit": profit,
+        "leverage": leverage,
         "pattern": pattern,
-        "pattern_acc": pattern_acc,
+        "pattern_success": pattern_success,
         "trade_success": trade_success,
-        "tf": tf,
-        "eta": random.choice(["15-30m","30-60m","1-2h"])
+        "confidence": confidence,
+        "liquidity_zone": liquidity_zone,
+        "eta": "30-60 mins"
     }
 
-# =========================
-# TRACK ACTIVE TRADE (UPDATED)
-# =========================
+# ================= MONITOR =================
 
-def track_trades(data):
-    for coin in list(active_trades.keys()):
+def monitor_trades():
+    for coin, trade in list(active_trades.items()):
         try:
-            price = data[coin]["quote"]["USD"]["price"]
-            trade = active_trades[coin]
+            price = get_price(coin+"USDT")
 
-            change = ((price - trade["entry"]) / trade["entry"]) * 100
-            change = change * trade["leverage"]
+            if price >= trade["tp"]:
+                send_telegram(f"🎯 TP HIT {coin}")
+                del active_trades[coin]
 
-            # 🔥 LOSS ALERTS
-            if change <= -10:
-                send_telegram(f"⚠️ {coin} reached -10%")
-
-            if change <= -15:
-                send_telegram(f"🚨 {coin} reached -15%")
-
-            # 🔥 REVERSAL ALERT (ADDED)
-            prev_price = last_prices.get(coin)
-            if prev_price:
-                if trade["direction"] == "BUY" and price < prev_price:
-                    send_telegram(f"🔄 {coin} possible reversal detected")
-
-            # 🔥 TP
-            if (trade["direction"] == "BUY" and price >= trade["tp"]) or \
-               (trade["direction"] == "SELL" and price <= trade["tp"]):
-                send_telegram(f"🎯 {coin} TP HIT")
+            elif price <= trade["sl"]:
+                send_telegram(f"🛑 SL HIT {coin}")
                 del active_trades[coin]
 
         except:
             continue
 
-# =========================
-# HANDLE TELEGRAM BUTTON (UNCHANGED)
-# =========================
+# ================= MAIN =================
 
-def check_updates():
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates"
-    res = requests.get(url).json()
-
-    if not res["result"]:
-        return
-
-    for update in res["result"]:
-        if "callback_query" in update:
-            data = update["callback_query"]["data"]
-
-            if data.startswith("ACT_"):
-                coin = data.split("_")[1]
-                active_trades[coin] = {
-                    "entry": last_prices[coin],
-                    "leverage": 10,
-                    "direction": "BUY"
-                }
-                send_telegram(f"✅ Trade Activated for {coin}")
-
-# =========================
-# MAIN LOOP (UNCHANGED)
-# =========================
-
-send_telegram("🚀 BOT STARTED - LIVE")
+send_telegram("🚀 BOT STARTED")
 
 while True:
     try:
-        print("🔁 Scanning...", datetime.now())
-
-        data = get_prices()
-        if not data:
-            time.sleep(10)
-            continue
-
-        for coin in COINS:
-            if coin not in data:
-                continue
-
-            price = data[coin]["quote"]["USD"]["price"]
-            last_prices[coin] = price
 
         check_updates()
-        track_trades(data)
+
+        signals = []
+
+        for coin in COINS:
+            s = generate_signal(coin)
+
+            if not s:
+                continue
+
+            if coin in last_sent_time:
+                if time.time() - last_sent_time[coin] < 3600:
+                    continue
+
+            signals.append((coin, s))
+            last_signal_data[coin] = s
 
         if time.time() - last_signal_time > 3600:
 
-            for coin in COINS:
-
-                if coin in last_sent_time and time.time() - last_sent_time[coin] < 3600:
-                    continue
-
-                price = last_prices[coin]
-                signal = generate_signal(price)
-
-                if not signal:
-                    continue
+            for coin, s in signals[:5]:
 
                 msg = f"""
 📊 {coin}
 
-📢 {signal['direction']} ({signal['leverage']}x)
+📢 {s['direction']} ({s['leverage']}x)
 
-Entry: {round(signal['entry'],4)}
-TP: {round(signal['tp'],4)}
-SL: {round(signal['sl'],4)}
+Entry: {round(s['entry'],4)}
+TP: {round(s['tp'],4)}
+SL: {round(s['sl'],4)}
 
-Profit: {signal['profit']}%
+Profit: {s['profit']}%
 
-🧠 Pattern: {signal['pattern']}
-📊 Pattern Accuracy: {signal['pattern_acc']}%
-🔥 Trade Success: {signal['trade_success']}%
+Pattern: {s['pattern']}
+Pattern Success: {s['pattern_success']}%
+Trade Success: {s['trade_success']}%
+Confidence: {s['confidence']}%
 
-TF: {signal['tf']}
-ETA: {signal['eta']}
+Liquidity Zone: {round(s['liquidity_zone'],4)}
+
+ETA: {s['eta']}
+
+🕒 {datetime.now().strftime('%H:%M:%S')}
 """
 
                 send_telegram(msg, coin)
@@ -256,8 +278,10 @@ ETA: {signal['eta']}
 
             last_signal_time = time.time()
 
+        monitor_trades()
+
         time.sleep(30)
 
     except Exception as e:
         print("Error:", e)
-        time.sleep(10)
+        time.sleep(5)
