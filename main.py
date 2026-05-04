@@ -6,7 +6,7 @@ from datetime import datetime
 # ================= CONFIG =================
 
 CMC_API_KEY = "695de55737564709a7b0176202c7d542"
-TELEGRAM_TOKEN = "YOUR_TOKEN"
+TELEGRAM_TOKEN = "8745061783:AAHqJQSq115g6DSbgiOn7Enx_nzoLDZngjE"
 CHAT_ID = "931982378"
 
 CMC_URL = "https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest"
