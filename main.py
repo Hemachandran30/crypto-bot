@@ -3,13 +3,10 @@ import time
 import random
 from datetime import datetime
 
-# =========================
-# CONFIG (UNCHANGED)
-# =========================
+# ================= CONFIG =================
 
 CMC_API_KEY = "695de55737564709a7b0176202c7d542"
-
-TELEGRAM_TOKEN = "8745061783:AAHqJQSq115g6DSbgiOn7Enx_nzoLDZngjE"
+TELEGRAM_TOKEN = "YOUR_TOKEN"
 CHAT_ID = "931982378"
 
 CMC_URL = "https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest"
@@ -26,38 +23,55 @@ COINS = [
 TIMEFRAMES = ["15m", "30m", "1h", "2h"]
 
 PATTERNS = [
-    "EMA Bullish", "EMA Bearish",
-    "Double Top", "Double Bottom",
-    "RSI Overbought", "RSI Oversold",
-    "Breakout", "Breakdown",
-    "Ascending Triangle", "Descending Triangle",
-    "Bull Flag", "Bear Flag",
-    "Cup & Handle", "Head & Shoulders",
-    "Inverse H&S", "Falling Wedge",
-    "Rising Wedge", "MACD Bullish",
-    "MACD Bearish", "Volume Spike"
+    "EMA Bullish","EMA Bearish","Breakout","Pullback","Reversal",
+    "Triangle","Flag","Wedge","Momentum Surge","Volume Spike"
 ]
 
-# =========================
-# TELEGRAM (FIXED ONLY LOGGING)
-# =========================
+active_trades = {}      # 🔥 TRACK ACTIVE TRADES
+last_signal_time = 0
+last_sent_time = {}     # 🔥 FIX duplicate issue
 
-def send_telegram(msg):
+# ================= TELEGRAM =================
+
+def send_telegram(msg, coin=None):
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        res = requests.post(url, data={"chat_id": CHAT_ID, "text": msg})
 
-        print("📨 Telegram Response:", res.text)
+        payload = {
+            "chat_id": CHAT_ID,
+            "text": msg
+        }
 
-        if res.status_code != 200:
-            print("❌ Telegram Failed:", res.text)
+        # 🔥 ADD BUTTON
+        if coin:
+            payload["reply_markup"] = {
+                "inline_keyboard": [[
+                    {"text": "✅ Activate Trade", "callback_data": f"ACTIVATE_{coin}"}
+                ]]
+            }
+
+        res = requests.post(url, json=payload)
+        print("📨 Telegram:", res.text)
 
     except Exception as e:
-        print("❌ Telegram Error:", e)
+        print("Telegram error:", e)
 
-# =========================
-# DATA FETCH (UNCHANGED + SAFE)
-# =========================
+# ================= HANDLE BUTTON =================
+
+def check_updates():
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates"
+    data = requests.get(url).json()
+
+    for update in data.get("result", []):
+        if "callback_query" in update:
+            data_cb = update["callback_query"]["data"]
+
+            if "ACTIVATE_" in data_cb:
+                coin = data_cb.split("_")[1]
+                active_trades[coin] = True
+                send_telegram(f"✅ Trade Activated for {coin}")
+
+# ================= DATA =================
 
 def get_prices():
     try:
@@ -66,78 +80,90 @@ def get_prices():
         data = res.json()
 
         if "data" not in data:
-            print("CMC API issue:", data)
             return {}
 
         return data["data"]
 
-    except Exception as e:
-        print("Fetch error:", e)
+    except:
         return {}
 
-# =========================
-# SIGNAL LOGIC (UNCHANGED)
-# =========================
+# ================= SIGNAL LOGIC =================
 
-def generate_signal(price):
+def generate_signal(price, prev_price):
+
     if price is None:
         return None
 
-    direction = random.choice(["BUY", "SELL"])
-    leverage = random.randint(3, 15)
+    # 🔥 Candle / momentum logic
+    change = ((price - prev_price) / prev_price) * 100 if prev_price else 0
 
-    move_needed = random.uniform(2, 3)
-    profit = round(move_needed * leverage, 2)
+    direction = "BUY" if change > 0 else "SELL"
+
+    # 🔥 LEVERAGE LOGIC (FIXED)
+    leverage = random.randint(5, 12)
+
+    target_profit = random.uniform(20, 25)
+    move = target_profit / leverage
 
     entry = price
 
-    # ✅ FIX: safe calculation
-    if entry is None:
-        return None
-
     if direction == "BUY":
-        tp = entry * (1 + move_needed/100)
-        sl = entry * (1 - move_needed/200)
+        tp = entry * (1 + move/100)
+        sl = entry * (1 - move/200)
     else:
-        tp = entry * (1 - move_needed/100)
-        sl = entry * (1 + move_needed/200)
-
-    pattern = random.choice(PATTERNS)
-    pattern_acc = random.randint(70, 90)
-    trade_success = random.randint(75, 90)
-
-    tf = random.choice(TIMEFRAMES)
-    eta = random.choice(["15-30 mins", "30-60 mins", "1-2 hours"])
+        tp = entry * (1 - move/100)
+        sl = entry * (1 + move/200)
 
     return {
         "direction": direction,
-        "leverage": leverage,
         "entry": entry,
         "tp": tp,
         "sl": sl,
-        "profit": profit,
-        "pattern": pattern,
-        "pattern_acc": pattern_acc,
-        "trade_success": trade_success,
-        "tf": tf,
-        "eta": eta
+        "profit": target_profit,
+        "leverage": leverage,
+        "pattern": random.choice(PATTERNS),
+        "tf": random.choice(TIMEFRAMES),
+        "eta": f"{random.randint(20,60)} mins"
     }
 
-# =========================
-# MAIN LOOP (UNCHANGED + SAFE)
-# =========================
+# ================= TRACK ACTIVE TRADES =================
 
-last_signal_time = 0
-sent_signals = {}
+def monitor_trades(price_data):
 
-send_telegram("🚀 BOT STARTED - LIVE SCANNING 24/7")
+    for coin in list(active_trades.keys()):
+
+        try:
+            price = price_data[coin]["quote"]["USD"]["price"]
+
+            trade = active_trades.get(coin)
+
+            if not trade:
+                continue
+
+            # 🔥 TP / SL alert
+            if price >= trade["tp"]:
+                send_telegram(f"🎯 TP HIT {coin}")
+                del active_trades[coin]
+
+            elif price <= trade["sl"]:
+                send_telegram(f"🛑 SL HIT {coin}")
+                del active_trades[coin]
+
+        except:
+            continue
+
+# ================= MAIN =================
+
+send_telegram("🚀 BOT STARTED")
+
+prev_prices = {}
 
 while True:
     try:
-        print("🔁 Scanning market...", datetime.now())
+
+        check_updates()
 
         data = get_prices()
-
         if not data:
             time.sleep(10)
             continue
@@ -145,68 +171,65 @@ while True:
         market_signals = []
 
         for coin in COINS:
-            try:
-                coin_data = data.get(coin)
 
-                if not coin_data:
-                    continue
-
-                price = coin_data["quote"]["USD"]["price"]
-
-                # ✅ FIX: skip None price
-                if price is None:
-                    print(f"⚠️ Skipping {coin} (price None)")
-                    continue
-
-                signal = generate_signal(price)
-
-                if signal is None:
-                    continue
-
-                if coin in sent_signals:
-                    continue
-
-                market_signals.append((coin, signal))
-
-            except Exception as e:
-                print(f"Skipping {coin} error:", e)
+            coin_data = data.get(coin)
+            if not coin_data:
                 continue
 
-        # ⏱ SEND SIGNAL EVERY 1 HOUR (UNCHANGED)
-        if time.time() - last_signal_time > 3600:
+            price = coin_data["quote"]["USD"]["price"]
+            if price is None:
+                continue
 
-            print("🚀 Sending signals...")
+            prev_price = prev_prices.get(coin, price)
+
+            signal = generate_signal(price, prev_price)
+
+            prev_prices[coin] = price
+
+            if signal is None:
+                continue
+
+            # 🔥 FIX DUPLICATE SIGNAL ISSUE
+            if coin in last_sent_time:
+                if time.time() - last_sent_time[coin] < 1800:
+                    continue
+
+            market_signals.append((coin, signal))
+
+        # 🔥 SEND EVERY 1 HOUR
+        if time.time() - last_signal_time > 3600:
 
             for coin, s in market_signals[:5]:
 
                 msg = f"""
 📊 {coin}
 
-📢 Signal: {s['direction']} ({s['leverage']}x)
+📢 {s['direction']} ({s['leverage']}x)
 
-💰 Entry: {round(s['entry'], 4)}
-🎯 TP: {round(s['tp'], 4)}
-🛑 SL: {round(s['sl'], 4)}
+Entry: {round(s['entry'],4)}
+TP: {round(s['tp'],4)}
+SL: {round(s['sl'],4)}
 
-📈 Profit Target: {s['profit']}%
+Profit: {s['profit']}%
 
-🧠 Pattern: {s['pattern']}
-📊 Pattern Accuracy: {s['pattern_acc']}%
-🔥 Trade Success: {s['trade_success']}%
+Pattern: {s['pattern']}
+TF: {s['tf']}
+ETA: {s['eta']}
 
-⏱ Timeframe: {s['tf']}
-⌛ ETA: {s['eta']}
-
-🕒 Time: {datetime.now().strftime('%H:%M:%S')}
+🕒 {datetime.now().strftime('%H:%M:%S')}
 """
 
-                send_telegram(msg)
-                sent_signals[coin] = True
+                send_telegram(msg, coin)
+
+                last_sent_time[coin] = time.time()
 
             last_signal_time = time.time()
+
+        # 🔥 TRACK ACTIVE TRADES
+        monitor_trades(data)
 
         time.sleep(30)
 
     except Exception as e:
-        print("Main loop error:", e)
+        print("Error:", e)
         time.sleep(10)
