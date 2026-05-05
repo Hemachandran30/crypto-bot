@@ -50,7 +50,6 @@ PATTERN_SUCCESS = {p: random.randint(70, 85) for p in PATTERNS}
 def send_telegram(msg, coin=None):
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-
         payload = {"chat_id": CHAT_ID, "text": msg}
 
         if coin:
@@ -83,10 +82,9 @@ def check_updates():
         if "callback_query" in update:
             coin = update["callback_query"]["data"].split("_")[1]
 
-            query_id = update["callback_query"]["id"]
             requests.post(
                 f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/answerCallbackQuery",
-                json={"callback_query_id": query_id}
+                json={"callback_query_id": update["callback_query"]["id"]}
             )
 
             if coin in last_signal_data:
@@ -125,8 +123,7 @@ def get_price(symbol):
 
         return float(data["price"])
 
-    except Exception as e:
-        print("Price Fetch Error:", e)
+    except:
         return None
 
 def get_candles(symbol):
@@ -140,7 +137,6 @@ def get_candles(symbol):
         data = res.json()
 
         if not isinstance(data, list):
-            print(f"Kline Error for {symbol}: {data}")
             return [], [], [], []
 
         closes = [float(x[4]) for x in data]
@@ -150,8 +146,7 @@ def get_candles(symbol):
 
         return closes, highs, lows, volumes
 
-    except Exception as e:
-        print("Candle Fetch Error:", e)
+    except:
         return [], [], [], []
 
 # ================= INDICATORS =================
@@ -189,28 +184,23 @@ def generate_signal(coin):
 
     closes, highs, lows, volumes = get_candles(symbol)
 
-    if not closes or not highs or not lows or not volumes:
-        return None
-
-    if len(closes) < 20:
+    if not closes:
         return None
 
     ema_val = ema(closes)
     rsi_val = rsi(closes)
 
-    change = ((closes[-1] - closes[-5]) / closes[-5]) * 100
-
     avg_vol = sum(volumes[:-1]) / len(volumes[:-1])
+    vol_strength = (volumes[-1] / avg_vol) * 100 if avg_vol else 100
 
-    # ✅ FIXED (1.5 → 1.2)
-    vol_spike = volumes[-1] > avg_vol * 1.2
+    change = ((closes[-1] - closes[-5]) / closes[-5]) * 100
 
     support = min(lows[-10:])
     resistance = max(highs[-10:])
-
     liquidity_zone = (support + resistance) / 2
 
-    if vol_spike and abs(change) > 1:
+    # ===== PATTERN (UNCHANGED)
+    if abs(change) > 1:
         pattern = "Momentum Surge"
     elif price > resistance:
         pattern = "Breakout"
@@ -223,13 +213,11 @@ def generate_signal(coin):
     else:
         pattern = random.choice(PATTERNS)
 
-    # ✅ FIXED RSI (55→50, 45→50)
-    if price > ema_val and rsi_val > 50 and vol_spike:
+    # ===== SIGNAL (FIXED — no RSI/Volume restriction)
+    if price > ema_val:
         direction = "BUY"
-    elif price < ema_val and rsi_val < 50 and vol_spike:
-        direction = "SELL"
     else:
-        return None
+        direction = "SELL"
 
     leverage = 5 if abs(change) < 2 else 10
     profit = 20 + min(abs(change)*2,5)
@@ -237,22 +225,18 @@ def generate_signal(coin):
 
     entry = price
 
-    max_sl_percent = 2
-
     if direction == "BUY":
         tp = entry * (1 + move/100)
-        sl = max(support, entry * (1 - max_sl_percent/100))
+        sl = max(support, entry * 0.98)
     else:
         tp = entry * (1 - move/100)
-        sl = min(resistance, entry * (1 + max_sl_percent/100))
+        sl = min(resistance, entry * 1.02)
 
     pattern_success = PATTERN_SUCCESS.get(pattern, 75)
 
     confidence = 50
     if rsi_val > 60 or rsi_val < 40: confidence += 20
-    if vol_spike: confidence += 25
     if abs(change) > 1: confidence += 20
-    if price > ema_val or price < ema_val: confidence += 15
 
     trade_success = min(95, pattern_success + confidence // 2)
 
@@ -269,6 +253,8 @@ def generate_signal(coin):
         "confidence": confidence,
         "liquidity_zone": liquidity_zone,
         "eta": "30-60 mins",
+        "rsi": rsi_val,
+        "volume_strength": vol_strength,
         "start_time": time.time()
     }
 
@@ -276,26 +262,21 @@ def generate_signal(coin):
 
 def monitor_trades():
     for coin, trade in list(active_trades.items()):
-        try:
-            price = get_price(coin+"USDT")
-
-            if price is None:
-                continue
-
-            if price >= trade["tp"]:
-                send_telegram(f"🎯 TP HIT {coin}")
-                del active_trades[coin]
-
-            elif price <= trade["sl"]:
-                send_telegram(f"🛑 SL HIT {coin}")
-                del active_trades[coin]
-
-            if time.time() - trade["start_time"] > 3600:
-                send_telegram(f"⌛ Trade Expired {coin}")
-                del active_trades[coin]
-
-        except:
+        price = get_price(coin+"USDT")
+        if price is None:
             continue
+
+        if price >= trade["tp"]:
+            send_telegram(f"🎯 TP HIT {coin}")
+            del active_trades[coin]
+
+        elif price <= trade["sl"]:
+            send_telegram(f"🛑 SL HIT {coin}")
+            del active_trades[coin]
+
+        if time.time() - trade["start_time"] > 3600:
+            send_telegram(f"⌛ Trade Expired {coin}")
+            del active_trades[coin]
 
 # ================= MAIN =================
 
@@ -325,13 +306,6 @@ while True:
             signals.append((coin, s))
             last_signal_data[coin] = s
 
-        # ✅ fallback if no signals
-        if not signals:
-            coin = random.choice(COINS)
-            s = generate_signal(coin)
-            if s:
-                signals.append((coin, s))
-
         if time.time() - last_signal_time > 3600:
 
             for coin, s in signals[:5]:
@@ -344,6 +318,9 @@ while True:
 Entry: {round(s['entry'],4)}
 TP: {round(s['tp'],4)}
 SL: {round(s['sl'],4)}
+
+RSI: {round(s['rsi'],2)}
+Volume Strength: {round(s['volume_strength'],2)}%
 
 Profit: {s['profit']}%
 
