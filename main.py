@@ -19,7 +19,8 @@ BINANCE_KLINE_URL = "https://api.binance.com/api/v3/klines"
 
 COINS = [
     "BTC","ETH","BNB","SOL","XRP","ADA","DOGE","DOT","MATIC","LTC",
-    "TRX","AVAX","LINK","ATOM","ETC","XLM","NEAR","APT","ARB","FIL"
+    "TRX","AVAX","LINK","ATOM","ETC","XLM","NEAR","APT","ARB","FIL",
+    "SUI","OP","PEPE","INJ","RNDR","FTM","ICP","SEI","TIA","PYTH"
 ]
 
 # ================= STATE =================
@@ -30,6 +31,9 @@ last_sent_time = {}
 last_signal_data = {}
 last_update_id = None
 VALID_SYMBOLS = set()
+
+# 🔥 ADDED (cooldown tracking)
+last_strong_signal_time = {}
 
 # ================= PATTERNS =================
 
@@ -63,34 +67,6 @@ def send_telegram(msg, coin=None):
     except:
         pass
 
-# ================= BUTTON =================
-
-def check_updates():
-    global last_update_id
-
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates"
-
-    params = {}
-    if last_update_id:
-        params["offset"] = last_update_id + 1
-
-    data = requests.get(url, params=params).json()
-
-    for update in data.get("result", []):
-        last_update_id = update["update_id"]
-
-        if "callback_query" in update:
-            coin = update["callback_query"]["data"].split("_")[1]
-
-            requests.post(
-                f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/answerCallbackQuery",
-                json={"callback_query_id": update["callback_query"]["id"]}
-            )
-
-            if coin in last_signal_data:
-                active_trades[coin] = last_signal_data[coin]
-                send_telegram(f"✅ Trade Activated for {coin}")
-
 # ================= DATA =================
 
 def get_candles_tf(symbol, interval):
@@ -102,8 +78,7 @@ def get_candles_tf(symbol, interval):
         }, headers=BINANCE_HEADERS, timeout=5)
 
         data = res.json()
-        closes = [float(x[4]) for x in data]
-        return closes
+        return [float(x[4]) for x in data]
     except:
         return []
 
@@ -111,9 +86,7 @@ def get_price(symbol):
     try:
         res = requests.get(BINANCE_PRICE_URL, params={"symbol": symbol}, timeout=5)
         data = res.json()
-        if "price" not in data:
-            return None
-        return float(data["price"])
+        return float(data["price"]) if "price" in data else None
     except:
         return None
 
@@ -172,14 +145,12 @@ def generate_signal(coin):
     ema_val = ema(closes)
     rsi_val = rsi(closes)
 
-    # 🔥 MULTI TIMEFRAME
     closes_1h = get_candles_tf(symbol, "1h")
     closes_2h = get_candles_tf(symbol, "2h")
 
     trend_1h = ema(closes_1h) if closes_1h else ema_val
     trend_2h = ema(closes_2h) if closes_2h else ema_val
 
-    # Trend confirmation
     bullish = price > ema_val and price > trend_1h and price > trend_2h
     bearish = price < ema_val and price < trend_1h and price < trend_2h
 
@@ -194,7 +165,14 @@ def generate_signal(coin):
     resistance = max(highs[-10:])
     liquidity_zone = (support + resistance) / 2
 
-    pattern = random.choice(PATTERNS)
+    if price > resistance:
+        pattern = "Breakout"
+    elif price < support:
+        pattern = "Fake Breakout"
+    elif abs(change) > 1:
+        pattern = "Momentum Surge"
+    else:
+        pattern = random.choice(PATTERNS)
 
     leverage = 5 if abs(change) < 2 else 10
     profit = 20 + min(abs(change)*2,5)
@@ -210,9 +188,10 @@ def generate_signal(coin):
         sl = min(resistance, entry * 1.02)
 
     pattern_success = PATTERN_SUCCESS.get(pattern, 75)
-
     confidence = 60
     trade_success = min(95, pattern_success + confidence // 2)
+
+    strong = abs(change) > 1.5 and vol_strength > 120
 
     return {
         "direction": direction,
@@ -229,6 +208,8 @@ def generate_signal(coin):
         "eta": "30-60 mins",
         "rsi": rsi_val,
         "volume_strength": vol_strength,
+        "timeframe": "15m + 1H + 2H",
+        "strong": strong,
         "start_time": time.time()
     }
 
@@ -246,14 +227,47 @@ while True:
             if s:
                 signals.append((coin, s))
 
-        # 🔥 FIXED LOGIC
-        if time.time() - last_signal_time > 3600:
+                # 🔥 STRONG SIGNAL (30 min cooldown)
+                if s["strong"]:
+                    now = time.time()
 
-            if signals:
+                    if coin not in last_strong_signal_time or now - last_strong_signal_time[coin] > 1800:
 
-                for coin, s in signals[:5]:
+                        send_telegram(f"""
+🔥 STRONG SIGNAL {coin}
 
-                    msg = f"""
+📢 {s['direction']}
+
+Entry: {round(s['entry'],4)}
+TP: {round(s['tp'],4)}
+SL: {round(s['sl'],4)}
+
+Pattern: {s['pattern']}
+Trade Success: {s['trade_success']}%
+RSI: {round(s['rsi'],2)}
+
+🕒 {datetime.now().strftime('%H:%M:%S')}
+""")
+
+                        last_strong_signal_time[coin] = now
+
+        # 🔥 EVERY 2 HOURS
+        if time.time() - last_signal_time > 7200:
+
+            if not signals:
+                coin = random.choice(COINS)
+                s = generate_signal(coin)
+                if s:
+                    signals.append((coin, s))
+
+            for coin, s in signals[:5]:
+
+                now = time.time()
+
+                if coin in last_sent_time and now - last_sent_time[coin] < 1800:
+                    continue
+
+                msg = f"""
 📊 {coin}
 
 📢 {s['direction']} ({s['leverage']}x)
@@ -272,15 +286,17 @@ Pattern Success: {s['pattern_success']}%
 Trade Success: {s['trade_success']}%
 Confidence: {s['confidence']}%
 
+Timeframe: {s['timeframe']}
 Liquidity Zone: {round(s['liquidity_zone'],4)}
 
 ETA: {s['eta']}
 
 🕒 {datetime.now().strftime('%H:%M:%S')}
 """
-                    send_telegram(msg, coin)
+                send_telegram(msg, coin)
+                last_sent_time[coin] = now
 
-                last_signal_time = time.time()
+            last_signal_time = time.time()
 
         time.sleep(30)
 
