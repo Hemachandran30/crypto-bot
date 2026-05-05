@@ -28,6 +28,8 @@ active_trades = {}
 last_signal_time = 0
 last_sent_time = {}
 last_signal_data = {}
+last_update_id = None
+VALID_SYMBOLS = set()
 
 # ================= PATTERNS =================
 
@@ -46,28 +48,47 @@ PATTERN_SUCCESS = {p: random.randint(70, 85) for p in PATTERNS}
 # ================= TELEGRAM =================
 
 def send_telegram(msg, coin=None):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    try:
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
 
-    payload = {"chat_id": CHAT_ID, "text": msg}
+        payload = {"chat_id": CHAT_ID, "text": msg}
 
-    if coin:
-        payload["reply_markup"] = {
-            "inline_keyboard": [[
-                {"text": "✅ Activate Trade", "callback_data": f"ACTIVATE_{coin}"}
-            ]]
-        }
+        if coin:
+            payload["reply_markup"] = {
+                "inline_keyboard": [[
+                    {"text": "✅ Activate Trade", "callback_data": f"ACTIVATE_{coin}"}
+                ]]
+            }
 
-    requests.post(url, json=payload)
+        requests.post(url, json=payload, timeout=5)
+    except:
+        pass
 
 # ================= BUTTON =================
 
 def check_updates():
+    global last_update_id
+
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates"
-    data = requests.get(url).json()
+
+    params = {}
+    if last_update_id:
+        params["offset"] = last_update_id + 1
+
+    data = requests.get(url, params=params).json()
 
     for update in data.get("result", []):
+        last_update_id = update["update_id"]
+
         if "callback_query" in update:
             coin = update["callback_query"]["data"].split("_")[1]
+
+            # Answer callback
+            query_id = update["callback_query"]["id"]
+            requests.post(
+                f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/answerCallbackQuery",
+                json={"callback_query_id": query_id}
+            )
 
             if coin in last_signal_data:
                 active_trades[coin] = last_signal_data[coin]
@@ -75,25 +96,64 @@ def check_updates():
 
 # ================= DATA =================
 
+def is_valid_symbol(symbol):
+    if symbol in VALID_SYMBOLS:
+        return True
+    try:
+        res = requests.get(BINANCE_PRICE_URL, params={"symbol": symbol}, timeout=5)
+        data = res.json()
+        if "price" in data:
+            VALID_SYMBOLS.add(symbol)
+            return True
+    except:
+        pass
+    return False
+
 def get_price(symbol):
-    res = requests.get(BINANCE_PRICE_URL, params={"symbol": symbol}, headers=BINANCE_HEADERS)
-    return float(res.json()["price"])
+    try:
+        res = requests.get(
+            BINANCE_PRICE_URL,
+            params={"symbol": symbol},
+            headers=BINANCE_HEADERS,
+            timeout=5
+        )
+
+        data = res.json()
+
+        if "price" not in data:
+            print(f"Binance Error for {symbol}: {data}")
+            return None
+
+        return float(data["price"])
+
+    except Exception as e:
+        print("Price Fetch Error:", e)
+        return None
 
 def get_candles(symbol):
-    res = requests.get(BINANCE_KLINE_URL, params={
-        "symbol": symbol,
-        "interval": "15m",
-        "limit": 50
-    }, headers=BINANCE_HEADERS)
+    try:
+        res = requests.get(BINANCE_KLINE_URL, params={
+            "symbol": symbol,
+            "interval": "15m",
+            "limit": 50
+        }, headers=BINANCE_HEADERS, timeout=5)
 
-    data = res.json()
+        data = res.json()
 
-    closes = [float(x[4]) for x in data]
-    highs = [float(x[2]) for x in data]
-    lows = [float(x[3]) for x in data]
-    volumes = [float(x[5]) for x in data]
+        if not isinstance(data, list):
+            print(f"Kline Error for {symbol}: {data}")
+            return [], [], [], []
 
-    return closes, highs, lows, volumes
+        closes = [float(x[4]) for x in data]
+        highs = [float(x[2]) for x in data]
+        lows = [float(x[3]) for x in data]
+        volumes = [float(x[5]) for x in data]
+
+        return closes, highs, lows, volumes
+
+    except Exception as e:
+        print("Candle Fetch Error:", e)
+        return [], [], [], []
 
 # ================= INDICATORS =================
 
@@ -121,8 +181,17 @@ def generate_signal(coin):
 
     symbol = coin + "USDT"
 
+    if not is_valid_symbol(symbol):
+        return None
+
     price = get_price(symbol)
+    if price is None:
+        return None
+
     closes, highs, lows, volumes = get_candles(symbol)
+
+    if not closes or not highs or not lows or not volumes:
+        return None
 
     if len(closes) < 20:
         return None
@@ -170,18 +239,18 @@ def generate_signal(coin):
 
     entry = price
 
+    max_sl_percent = 2
+
     if direction == "BUY":
         tp = entry * (1 + move/100)
-        sl = support
+        sl = max(support, entry * (1 - max_sl_percent/100))
     else:
         tp = entry * (1 - move/100)
-        sl = resistance
-
-    # ================= SUCCESS LOGIC =================
+        sl = min(resistance, entry * (1 + max_sl_percent/100))
 
     pattern_success = PATTERN_SUCCESS.get(pattern, 75)
 
-    confidence = 0
+    confidence = 50
     if rsi_val > 60 or rsi_val < 40: confidence += 20
     if vol_spike: confidence += 25
     if abs(change) > 1: confidence += 20
@@ -201,7 +270,8 @@ def generate_signal(coin):
         "trade_success": trade_success,
         "confidence": confidence,
         "liquidity_zone": liquidity_zone,
-        "eta": "30-60 mins"
+        "eta": "30-60 mins",
+        "start_time": time.time()
     }
 
 # ================= MONITOR =================
@@ -211,12 +281,20 @@ def monitor_trades():
         try:
             price = get_price(coin+"USDT")
 
+            if price is None:
+                continue
+
             if price >= trade["tp"]:
                 send_telegram(f"🎯 TP HIT {coin}")
                 del active_trades[coin]
 
             elif price <= trade["sl"]:
                 send_telegram(f"🛑 SL HIT {coin}")
+                del active_trades[coin]
+
+            # Expiry
+            if time.time() - trade["start_time"] > 3600:
+                send_telegram(f"⌛ Trade Expired {coin}")
                 del active_trades[coin]
 
         except:
@@ -234,6 +312,10 @@ while True:
         signals = []
 
         for coin in COINS:
+
+            if coin in active_trades:
+                continue
+
             s = generate_signal(coin)
 
             if not s:
