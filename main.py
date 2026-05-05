@@ -93,36 +93,27 @@ def check_updates():
 
 # ================= DATA =================
 
-def is_valid_symbol(symbol):
-    if symbol in VALID_SYMBOLS:
-        return True
+def get_candles_tf(symbol, interval):
     try:
-        res = requests.get(BINANCE_PRICE_URL, params={"symbol": symbol}, timeout=5)
+        res = requests.get(BINANCE_KLINE_URL, params={
+            "symbol": symbol,
+            "interval": interval,
+            "limit": 50
+        }, headers=BINANCE_HEADERS, timeout=5)
+
         data = res.json()
-        if "price" in data:
-            VALID_SYMBOLS.add(symbol)
-            return True
+        closes = [float(x[4]) for x in data]
+        return closes
     except:
-        pass
-    return False
+        return []
 
 def get_price(symbol):
     try:
-        res = requests.get(
-            BINANCE_PRICE_URL,
-            params={"symbol": symbol},
-            headers=BINANCE_HEADERS,
-            timeout=5
-        )
-
+        res = requests.get(BINANCE_PRICE_URL, params={"symbol": symbol}, timeout=5)
         data = res.json()
-
         if "price" not in data:
-            print(f"Binance Error for {symbol}: {data}")
             return None
-
         return float(data["price"])
-
     except:
         return None
 
@@ -136,16 +127,12 @@ def get_candles(symbol):
 
         data = res.json()
 
-        if not isinstance(data, list):
-            return [], [], [], []
-
         closes = [float(x[4]) for x in data]
         highs = [float(x[2]) for x in data]
         lows = [float(x[3]) for x in data]
         volumes = [float(x[5]) for x in data]
 
         return closes, highs, lows, volumes
-
     except:
         return [], [], [], []
 
@@ -174,21 +161,29 @@ def rsi(prices, period=14):
 def generate_signal(coin):
 
     symbol = coin + "USDT"
-
-    if not is_valid_symbol(symbol):
-        return None
-
     price = get_price(symbol)
     if price is None:
         return None
 
     closes, highs, lows, volumes = get_candles(symbol)
-
     if not closes:
         return None
 
     ema_val = ema(closes)
     rsi_val = rsi(closes)
+
+    # 🔥 MULTI TIMEFRAME
+    closes_1h = get_candles_tf(symbol, "1h")
+    closes_2h = get_candles_tf(symbol, "2h")
+
+    trend_1h = ema(closes_1h) if closes_1h else ema_val
+    trend_2h = ema(closes_2h) if closes_2h else ema_val
+
+    # Trend confirmation
+    bullish = price > ema_val and price > trend_1h and price > trend_2h
+    bearish = price < ema_val and price < trend_1h and price < trend_2h
+
+    direction = "BUY" if bullish else "SELL"
 
     avg_vol = sum(volumes[:-1]) / len(volumes[:-1])
     vol_strength = (volumes[-1] / avg_vol) * 100 if avg_vol else 100
@@ -199,25 +194,7 @@ def generate_signal(coin):
     resistance = max(highs[-10:])
     liquidity_zone = (support + resistance) / 2
 
-    # ===== PATTERN (UNCHANGED)
-    if abs(change) > 1:
-        pattern = "Momentum Surge"
-    elif price > resistance:
-        pattern = "Breakout"
-    elif price < support:
-        pattern = "Fake Breakout"
-    elif abs(change) < 0.5:
-        pattern = "Range Break"
-    elif price > ema_val:
-        pattern = "Trend Continuation"
-    else:
-        pattern = random.choice(PATTERNS)
-
-    # ===== SIGNAL (FIXED — no RSI/Volume restriction)
-    if price > ema_val:
-        direction = "BUY"
-    else:
-        direction = "SELL"
+    pattern = random.choice(PATTERNS)
 
     leverage = 5 if abs(change) < 2 else 10
     profit = 20 + min(abs(change)*2,5)
@@ -234,10 +211,7 @@ def generate_signal(coin):
 
     pattern_success = PATTERN_SUCCESS.get(pattern, 75)
 
-    confidence = 50
-    if rsi_val > 60 or rsi_val < 40: confidence += 20
-    if abs(change) > 1: confidence += 20
-
+    confidence = 60
     trade_success = min(95, pattern_success + confidence // 2)
 
     return {
@@ -258,26 +232,6 @@ def generate_signal(coin):
         "start_time": time.time()
     }
 
-# ================= MONITOR =================
-
-def monitor_trades():
-    for coin, trade in list(active_trades.items()):
-        price = get_price(coin+"USDT")
-        if price is None:
-            continue
-
-        if price >= trade["tp"]:
-            send_telegram(f"🎯 TP HIT {coin}")
-            del active_trades[coin]
-
-        elif price <= trade["sl"]:
-            send_telegram(f"🛑 SL HIT {coin}")
-            del active_trades[coin]
-
-        if time.time() - trade["start_time"] > 3600:
-            send_telegram(f"⌛ Trade Expired {coin}")
-            del active_trades[coin]
-
 # ================= MAIN =================
 
 send_telegram("🚀 BOT STARTED")
@@ -285,32 +239,21 @@ send_telegram("🚀 BOT STARTED")
 while True:
     try:
 
-        check_updates()
-
         signals = []
 
         for coin in COINS:
-
-            if coin in active_trades:
-                continue
-
             s = generate_signal(coin)
+            if s:
+                signals.append((coin, s))
 
-            if not s:
-                continue
-
-            if coin in last_sent_time:
-                if time.time() - last_sent_time[coin] < 3600:
-                    continue
-
-            signals.append((coin, s))
-            last_signal_data[coin] = s
-
+        # 🔥 FIXED LOGIC
         if time.time() - last_signal_time > 3600:
 
-            for coin, s in signals[:5]:
+            if signals:
 
-                msg = f"""
+                for coin, s in signals[:5]:
+
+                    msg = f"""
 📊 {coin}
 
 📢 {s['direction']} ({s['leverage']}x)
@@ -335,13 +278,9 @@ ETA: {s['eta']}
 
 🕒 {datetime.now().strftime('%H:%M:%S')}
 """
+                    send_telegram(msg, coin)
 
-                send_telegram(msg, coin)
-                last_sent_time[coin] = time.time()
-
-            last_signal_time = time.time()
-
-        monitor_trades()
+                last_signal_time = time.time()
 
         time.sleep(30)
 
