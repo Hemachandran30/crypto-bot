@@ -83,7 +83,6 @@ def check_updates():
         if "callback_query" in update:
             coin = update["callback_query"]["data"].split("_")[1]
 
-            # Answer callback
             query_id = update["callback_query"]["id"]
             requests.post(
                 f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/answerCallbackQuery",
@@ -202,14 +201,14 @@ def generate_signal(coin):
     change = ((closes[-1] - closes[-5]) / closes[-5]) * 100
 
     avg_vol = sum(volumes[:-1]) / len(volumes[:-1])
-    vol_spike = volumes[-1] > avg_vol * 1.5
+
+    # ✅ FIXED (1.5 → 1.2)
+    vol_spike = volumes[-1] > avg_vol * 1.2
 
     support = min(lows[-10:])
     resistance = max(highs[-10:])
 
     liquidity_zone = (support + resistance) / 2
-
-    # ================= PATTERN LOGIC =================
 
     if vol_spike and abs(change) > 1:
         pattern = "Momentum Surge"
@@ -224,11 +223,10 @@ def generate_signal(coin):
     else:
         pattern = random.choice(PATTERNS)
 
-    # ================= SIGNAL LOGIC =================
-
-    if price > ema_val and rsi_val > 55 and vol_spike:
+    # ✅ FIXED RSI (55→50, 45→50)
+    if price > ema_val and rsi_val > 50 and vol_spike:
         direction = "BUY"
-    elif price < ema_val and rsi_val < 45 and vol_spike:
+    elif price < ema_val and rsi_val < 50 and vol_spike:
         direction = "SELL"
     else:
         return None
@@ -292,7 +290,6 @@ def monitor_trades():
                 send_telegram(f"🛑 SL HIT {coin}")
                 del active_trades[coin]
 
-            # Expiry
             if time.time() - trade["start_time"] > 3600:
                 send_telegram(f"⌛ Trade Expired {coin}")
                 del active_trades[coin]
@@ -327,6 +324,13 @@ while True:
 
             signals.append((coin, s))
             last_signal_data[coin] = s
+
+        # ✅ fallback if no signals
+        if not signals:
+            coin = random.choice(COINS)
+            s = generate_signal(coin)
+            if s:
+                signals.append((coin, s))
 
         if time.time() - last_signal_time > 3600:
 
