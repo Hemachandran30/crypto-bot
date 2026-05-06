@@ -298,39 +298,36 @@ def generate_signal(coin):
 
     # ================= MULTI TIMEFRAMES =================
 
-    closes_5m = get_candles_tf(symbol, "5m")
-    closes_15m = get_candles_tf(symbol, "15m")
-    closes_30m = get_candles_tf(symbol, "30m")
-    closes_1h = get_candles_tf(symbol, "1h")
-    closes_2h = get_candles_tf(symbol, "2h")
-    closes_4h = get_candles_tf(symbol, "4h")
-    closes_8h = get_candles_tf(symbol, "8h")
-    closes_1d = get_candles_tf(symbol, "1d")
 
-    trend_5m = ema(closes_5m) if closes_5m else ema_val
-    trend_15m = ema(closes_15m) if closes_15m else ema_val
-    trend_30m = ema(closes_30m) if closes_30m else ema_val
-    trend_1h = ema(closes_1h) if closes_1h else ema_val
-    trend_2h = ema(closes_2h) if closes_2h else ema_val
-    trend_4h = ema(closes_4h) if closes_4h else ema_val
-    trend_8h = ema(closes_8h) if closes_8h else ema_val
-    trend_1d = ema(closes_1d) if closes_1d else ema_val
+closes_5m = get_candles_tf(symbol, "5m")
+closes_15m = get_candles_tf(symbol, "15m")
+closes_30m = get_candles_tf(symbol, "30m")
+closes_1h = get_candles_tf(symbol, "1h")
+closes_2h = get_candles_tf(symbol, "2h")
 
-    bullish = (
-        price > trend_5m and
-        price > trend_15m and
-        price > trend_30m and
-        price > trend_1h and
-        price > trend_2h
-    )
+trend_5m = ema(closes_5m) if closes_5m else ema_val
+trend_15m = ema(closes_15m) if closes_15m else ema_val
+trend_30m = ema(closes_30m) if closes_30m else ema_val
+trend_1h = ema(closes_1h) if closes_1h else ema_val
+trend_2h = ema(closes_2h) if closes_2h else ema_val
 
-    bearish = (
-        price < trend_5m and
-        price < trend_15m and
-        price < trend_30m and
-        price < trend_1h and
-        price < trend_2h
-    )
+bullish = (
+    price > ema_val and
+    price > trend_5m and
+    price > trend_15m and
+    price > trend_30m and
+    price > trend_1h and
+    price > trend_2h
+)
+
+bearish = (
+    price < ema_val and
+    price < trend_5m and
+    price < trend_15m and
+    price < trend_30m and
+    price < trend_1h and
+    price < trend_2h
+)
 
     direction = "BUY" if bullish else "SELL"
 
