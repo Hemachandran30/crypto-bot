@@ -25,7 +25,7 @@ BINANCE_KLINE_URL = "https://api.binance.com/api/v3/klines"
 COINS = [
     "BTC","ETH","BNB","SOL","XRP","ADA","DOGE","DOT","MATIC","LTC",
     "TRX","AVAX","LINK","ATOM","ETC","XLM","NEAR","APT","ARB","FIL",
-    "SUI","OP","PEPE","INJ","RNDR","FTM","ICP","SEI","TIA","PYTH"
+    "SUI"
 ]
 
 # ================= STATE =================
