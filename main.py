@@ -15,7 +15,7 @@ from datetime import datetime
 
 # ================= CONFIG =================
 
-TELEGRAM_TOKEN = "8745061783:AAHqJQSq115g6DSbgiOn7Enx_nzoLDZngjE"
+TELEGRAM_TOKEN = "8265055522:AAGl2v211gtKwqYTmjue_gXW9Vx0dvf8Wes"
 CHAT_ID = "931982378"
 
 BINANCE_API_KEY = "ISvf5mwnZA5P3t9EuHFCa1cSobM6VvHPQ5kMrNBSWWX0F6O0Ss3dzf7YGlbXpvsI"
