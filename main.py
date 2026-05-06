@@ -52,7 +52,9 @@ PATTERN_SUCCESS = {p: random.randint(70, 85) for p in PATTERNS}
 # ================= TELEGRAM =================
 
 def send_telegram(msg, coin=None):
+
     try:
+
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
 
         payload = {
@@ -61,6 +63,7 @@ def send_telegram(msg, coin=None):
         }
 
         if coin:
+
             payload["reply_markup"] = {
                 "inline_keyboard": [[
                     {
@@ -70,9 +73,16 @@ def send_telegram(msg, coin=None):
                 ]]
             }
 
-        requests.post(url, json=payload, timeout=10)
+        res = requests.post(
+            url,
+            json=payload,
+            timeout=10
+        )
+
+        print("Telegram:", res.status_code)
 
     except Exception as e:
+
         print("Telegram Error:", e)
 
 # ================= BUTTON =================
@@ -90,7 +100,11 @@ def check_updates():
         if last_update_id:
             params["offset"] = last_update_id + 1
 
-        data = requests.get(url, params=params, timeout=10).json()
+        data = requests.get(
+            url,
+            params=params,
+            timeout=10
+        ).json()
 
         for update in data.get("result", []):
 
@@ -117,9 +131,12 @@ def check_updates():
 
                         active_trades[coin] = last_signal_data[coin]
 
-                        send_telegram(f"✅ Trade Activated for {coin}")
+                        send_telegram(
+                            f"✅ Trade Activated for {coin}"
+                        )
 
     except Exception as e:
+
         print("Button Error:", e)
 
 # ================= DATA =================
@@ -141,9 +158,15 @@ def get_candles_tf(symbol, interval):
 
         data = res.json()
 
+        if not isinstance(data, list):
+            return []
+
         return [float(x[4]) for x in data]
 
-    except:
+    except Exception as e:
+
+        print("TF Candle Error:", e)
+
         return []
 
 def get_price(symbol):
@@ -163,7 +186,10 @@ def get_price(symbol):
 
         return float(data["price"])
 
-    except:
+    except Exception as e:
+
+        print("Price Error:", e)
+
         return None
 
 def get_candles(symbol):
@@ -183,6 +209,9 @@ def get_candles(symbol):
 
         data = res.json()
 
+        if not isinstance(data, list):
+            return [], [], [], []
+
         closes = [float(x[4]) for x in data]
         highs = [float(x[2]) for x in data]
         lows = [float(x[3]) for x in data]
@@ -190,7 +219,10 @@ def get_candles(symbol):
 
         return closes, highs, lows, volumes
 
-    except:
+    except Exception as e:
+
+        print("Candle Error:", e)
+
         return [], [], [], []
 
 # ================= INDICATORS =================
@@ -278,7 +310,10 @@ def generate_signal(coin):
 
     direction = "BUY" if bullish else "SELL"
 
-    avg_vol = sum(volumes[:-1]) / len(volumes[:-1]) if len(volumes) > 1 else 1
+    avg_vol = (
+        sum(volumes[:-1]) / len(volumes[:-1])
+        if len(volumes) > 1 else 1
+    )
 
     vol_strength = (
         (volumes[-1] / avg_vol) * 100
@@ -290,23 +325,34 @@ def generate_signal(coin):
         if len(closes) >= 5 else 0
     )
 
-    support = min(lows[-10:]) if len(lows) >= 10 else lows[-1]
-    resistance = max(highs[-10:]) if len(highs) >= 10 else highs[-1]
+    support = (
+        min(lows[-10:])
+        if len(lows) >= 10 else lows[-1]
+    )
+
+    resistance = (
+        max(highs[-10:])
+        if len(highs) >= 10 else highs[-1]
+    )
 
     liquidity_zone = (support + resistance) / 2
 
     # ================= PATTERN =================
 
     if price > resistance:
+
         pattern = "Breakout"
 
     elif price < support:
+
         pattern = "Fake Breakout"
 
     elif abs(change) > 1:
+
         pattern = "Momentum Surge"
 
     else:
+
         pattern = random.choice(PATTERNS)
 
     # ================= TRADE LOGIC =================
@@ -401,12 +447,18 @@ def monitor_trades():
 
                 del active_trades[coin]
 
-        except:
+        except Exception as e:
+
+            print("Monitor Error:", e)
+
             continue
 
 # ================= MAIN =================
 
 send_telegram("🚀 BOT STARTED")
+
+# 🔥 IMMEDIATE FIRST SIGNAL
+last_signal_time = time.time() - 3600
 
 while True:
 
@@ -469,6 +521,8 @@ ETA: {s['eta']}
         if time.time() - last_signal_time > 3600:
 
             now = time.time()
+
+            sent_count = 0
 
             # 🔥 GUARANTEED SIGNAL
 
@@ -542,6 +596,70 @@ ETA: {s['eta']}
                 send_telegram(msg, coin)
 
                 last_sent_time[coin] = now
+
+                sent_count += 1
+
+            # 🔥 FORCE GUARANTEED SIGNAL
+
+            if sent_count == 0:
+
+                best_coin = None
+                best_signal = None
+                best_score = -999
+
+                for test_coin in COINS:
+
+                    test_signal = generate_signal(test_coin)
+
+                    if not test_signal:
+                        continue
+
+                    score = (
+                        test_signal["trade_success"] +
+                        test_signal["confidence"] +
+                        test_signal["pattern_success"]
+                    )
+
+                    if score > best_score:
+
+                        best_score = score
+                        best_coin = test_coin
+                        best_signal = test_signal
+
+                if best_signal:
+
+                    force_msg = f"""
+📊 {best_coin}
+
+📢 {best_signal['direction']} ({best_signal['leverage']}x)
+
+Entry: {round(best_signal['entry'],4)}
+TP: {round(best_signal['tp'],4)}
+SL: {round(best_signal['sl'],4)}
+
+RSI: {round(best_signal['rsi'],2)}
+Volume Strength: {round(best_signal['volume_strength'],2)}%
+
+Profit: {round(best_signal['profit'],2)}%
+
+Pattern: {best_signal['pattern']}
+Pattern Success: {best_signal['pattern_success']}%
+
+Trade Success: {best_signal['trade_success']}%
+Confidence: {best_signal['confidence']}%
+
+Timeframe: {best_signal['timeframe']}
+
+Liquidity Zone: {round(best_signal['liquidity_zone'],4)}
+
+ETA: {best_signal['eta']}
+
+🕒 {datetime.now().strftime('%H:%M:%S')}
+"""
+
+                    send_telegram(force_msg, best_coin)
+
+                    last_sent_time[best_coin] = time.time()
 
             last_signal_time = now
 
