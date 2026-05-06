@@ -67,7 +67,7 @@ def send_telegram(msg, coin=None):
 
         payload = {
             "chat_id": CHAT_ID,
-            "text": msg
+            "text": msg[:4000]
         }
 
         if coin:
@@ -84,10 +84,11 @@ def send_telegram(msg, coin=None):
         res = requests.post(
             url,
             json=payload,
-            timeout=10
+            timeout=15
         )
 
-        print("Telegram:", res.status_code)
+        print("Telegram Status:", res.status_code)
+        print("Telegram Response:", res.text)
 
     except Exception as e:
 
@@ -310,23 +311,31 @@ def generate_signal(coin):
     trend_1h = ema(closes_1h) if closes_1h else ema_val
     trend_2h = ema(closes_2h) if closes_2h else ema_val
 
-    bullish = (
-        price > trend_5m and
-        price > trend_15m and
-        price > trend_30m and
-        price > trend_1h and
-        price > trend_2h
-    )
+    # ================= FIXED SIGNAL LOGIC =================
 
-    bearish = (
-        price < trend_5m and
-        price < trend_15m and
-        price < trend_30m and
-        price < trend_1h and
-        price < trend_2h
-    )
+    trend_score = 0
 
-    direction = "BUY" if bullish else "SELL"
+    timeframes = [
+        trend_5m,
+        trend_15m,
+        trend_30m,
+        trend_1h,
+        trend_2h
+    ]
+
+    for trend in timeframes:
+
+        if price > trend:
+            trend_score += 1
+        else:
+            trend_score -= 1
+
+    # 🔥 ALWAYS CREATE SIGNAL
+
+    if trend_score >= 0:
+        direction = "BUY"
+    else:
+        direction = "SELL"
 
     avg_vol = (
         sum(volumes[:-1]) / len(volumes[:-1])
@@ -494,6 +503,7 @@ def monitor_trades():
 # ================= MAIN =================
 
 send_telegram("🚀 BOT STARTED")
+send_telegram("✅ TEST MESSAGE WORKING")
 
 # 🔥 IMMEDIATE FIRST SIGNAL
 last_signal_time = time.time() - 3600
@@ -516,7 +526,7 @@ while True:
             if not s:
                 continue
 
-            print(f"Signal Generated: {coin}")
+            print(f"VALID SIGNAL FOUND: {coin}")
             print(f"Signal Direction: {s['direction']}")
             print(f"Trade Success: {s['trade_success']}%")
             print(f"Confidence: {s['confidence']}%")
@@ -576,12 +586,6 @@ ETA: {s['eta']}
 
             for coin, s in signals[:5]:
 
-                if (
-                    coin in last_sent_time and
-                    now - last_sent_time[coin] < 1800
-                ):
-                    continue
-
                 msg = f"""
 📊 {coin}
 
@@ -621,44 +625,48 @@ ETA: {s['eta']}
 
             # 🔥 FORCE SIGNAL IF NONE SENT
 
-            if sent_count == 0 and signals:
+            if sent_count == 0:
 
-                best_coin, best_signal = signals[0]
+                print("NO SIGNALS FOUND - SENDING FORCED SIGNAL")
 
-                force_msg = f"""
-📊 {best_coin}
+                forced_coin = random.choice(COINS)
 
-📢 {best_signal['direction']} ({best_signal['leverage']}x)
+                forced_signal = generate_signal(forced_coin)
 
-Entry: {round(best_signal['entry'],4)}
-TP: {round(best_signal['tp'],4)}
-SL: {round(best_signal['sl'],4)}
+                if forced_signal:
 
-RSI: {round(best_signal['rsi'],2)}
-Volume Strength: {round(best_signal['volume_strength'],2)}%
+                    force_msg = f"""
+📊 {forced_coin}
 
-Profit: {round(best_signal['profit'],2)}%
+📢 {forced_signal['direction']} ({forced_signal['leverage']}x)
 
-Pattern: {best_signal['pattern']}
-Pattern Success: {best_signal['pattern_success']}%
+Entry: {round(forced_signal['entry'],4)}
+TP: {round(forced_signal['tp'],4)}
+SL: {round(forced_signal['sl'],4)}
 
-Trade Success: {best_signal['trade_success']}%
-Confidence: {best_signal['confidence']}%
+RSI: {round(forced_signal['rsi'],2)}
+Volume Strength: {round(forced_signal['volume_strength'],2)}%
 
-Timeframe: {best_signal['timeframe']}
+Profit: {round(forced_signal['profit'],2)}%
 
-Liquidity Zone: {round(best_signal['liquidity_zone'],4)}
+Pattern: {forced_signal['pattern']}
+Pattern Success: {forced_signal['pattern_success']}%
 
-ETA: {best_signal['eta']}
+Trade Success: {forced_signal['trade_success']}%
+Confidence: {forced_signal['confidence']}%
+
+Timeframe: {forced_signal['timeframe']}
+
+Liquidity Zone: {round(forced_signal['liquidity_zone'],4)}
+
+ETA: {forced_signal['eta']}
 
 🕒 {datetime.now().strftime('%H:%M:%S')}
 """
 
-                send_telegram(force_msg, best_coin)
+                    send_telegram(force_msg, forced_coin)
 
-                print(f"Forced Telegram Signal Delivered: {best_coin}")
-
-                last_sent_time[best_coin] = time.time()
+                    print(f"Forced Telegram Signal Delivered: {forced_coin}")
 
             last_signal_time = now
 
@@ -666,7 +674,7 @@ ETA: {best_signal['eta']}
 
         monitor_trades()
 
-        time.sleep(60)
+        time.sleep(15)
 
     except Exception as e:
 
