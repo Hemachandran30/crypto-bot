@@ -25,7 +25,7 @@ BINANCE_KLINE_URL = "https://api.binance.com/api/v3/klines"
 COINS = [
     "BTC","ETH","BNB","SOL","XRP","ADA","DOGE","DOT","MATIC","LTC",
     "TRX","AVAX","LINK","ATOM","ETC","XLM","NEAR","APT","ARB","FIL",
-    "SUI"
+    "SUI","OP","PEPE","INJ","RNDR","FTM","ICP","SEI","TIA","PYTH"
 ]
 
 # ================= STATE =================
@@ -298,36 +298,33 @@ def generate_signal(coin):
 
     # ================= MULTI TIMEFRAMES =================
 
+    closes_5m = get_candles_tf(symbol, "5m")
+    closes_15m = get_candles_tf(symbol, "15m")
+    closes_30m = get_candles_tf(symbol, "30m")
+    closes_1h = get_candles_tf(symbol, "1h")
+    closes_2h = get_candles_tf(symbol, "2h")
 
-closes_5m = get_candles_tf(symbol, "5m")
-closes_15m = get_candles_tf(symbol, "15m")
-closes_30m = get_candles_tf(symbol, "30m")
-closes_1h = get_candles_tf(symbol, "1h")
-closes_2h = get_candles_tf(symbol, "2h")
+    trend_5m = ema(closes_5m) if closes_5m else ema_val
+    trend_15m = ema(closes_15m) if closes_15m else ema_val
+    trend_30m = ema(closes_30m) if closes_30m else ema_val
+    trend_1h = ema(closes_1h) if closes_1h else ema_val
+    trend_2h = ema(closes_2h) if closes_2h else ema_val
 
-trend_5m = ema(closes_5m) if closes_5m else ema_val
-trend_15m = ema(closes_15m) if closes_15m else ema_val
-trend_30m = ema(closes_30m) if closes_30m else ema_val
-trend_1h = ema(closes_1h) if closes_1h else ema_val
-trend_2h = ema(closes_2h) if closes_2h else ema_val
+    bullish = (
+        price > trend_5m and
+        price > trend_15m and
+        price > trend_30m and
+        price > trend_1h and
+        price > trend_2h
+    )
 
-bullish = (
-    price > ema_val and
-    price > trend_5m and
-    price > trend_15m and
-    price > trend_30m and
-    price > trend_1h and
-    price > trend_2h
-)
-
-bearish = (
-    price < ema_val and
-    price < trend_5m and
-    price < trend_15m and
-    price < trend_30m and
-    price < trend_1h and
-    price < trend_2h
-)
+    bearish = (
+        price < trend_5m and
+        price < trend_15m and
+        price < trend_30m and
+        price < trend_1h and
+        price < trend_2h
+    )
 
     direction = "BUY" if bullish else "SELL"
 
@@ -424,9 +421,6 @@ TIMEFRAME STATUS {coin}
 30m : {'Bullish' if price > trend_30m else 'Bearish'}
 1H  : {'Bullish' if price > trend_1h else 'Bearish'}
 2H  : {'Bullish' if price > trend_2h else 'Bearish'}
-4H  : {'Bullish' if price > trend_4h else 'Bearish'}
-8H  : {'Bullish' if price > trend_8h else 'Bearish'}
-1D  : {'Bullish' if price > trend_1d else 'Bearish'}
 ==============================
 """)
 
@@ -445,7 +439,7 @@ TIMEFRAME STATUS {coin}
         "eta": "30-60 mins",
         "rsi": rsi_val,
         "volume_strength": vol_strength,
-        "timeframe": "5m + 15m + 30m + 1H + 2H + 4H + 8H + 1D",
+        "timeframe": "5m + 15m + 30m + 1H + 2H",
         "strong": strong,
         "start_time": time.time()
     }
@@ -463,17 +457,33 @@ def monitor_trades():
             if price is None:
                 continue
 
-            if price >= trade["tp"]:
+            if trade["direction"] == "BUY":
 
-                send_telegram(f"🎯 TP HIT {coin}")
+                if price >= trade["tp"]:
 
-                del active_trades[coin]
+                    send_telegram(f"🎯 TP HIT {coin}")
 
-            elif price <= trade["sl"]:
+                    del active_trades[coin]
 
-                send_telegram(f"🛑 SL HIT {coin}")
+                elif price <= trade["sl"]:
 
-                del active_trades[coin]
+                    send_telegram(f"🛑 SL HIT {coin}")
+
+                    del active_trades[coin]
+
+            else:
+
+                if price <= trade["tp"]:
+
+                    send_telegram(f"🎯 TP HIT {coin}")
+
+                    del active_trades[coin]
+
+                elif price >= trade["sl"]:
+
+                    send_telegram(f"🛑 SL HIT {coin}")
+
+                    del active_trades[coin]
 
         except Exception as e:
 
@@ -656,7 +666,7 @@ ETA: {best_signal['eta']}
 
         monitor_trades()
 
-        time.sleep(30)
+        time.sleep(60)
 
     except Exception as e:
 
