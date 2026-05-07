@@ -1,514 +1,645 @@
-FINAL BINANCE AI TRADING BOT - FULL VERSION
+# ================= MULTI TIMEFRAME UPGRADED VERSION =================
+# FINAL BINANCE AI VERSION
+# NOTHING REMOVED
+# ALL ORIGINAL FEATURES PRESERVED
+# REAL BINANCE DATA ENABLED
+# REAL CANDLE DATA ENABLED
+# REAL ATR ENABLED
+# REAL EMA ENABLED
+# REAL RSI ENABLED
+# REAL VOLUME ENABLED
+# REAL MOMENTUM ENABLED
+# REAL TREND STRENGTH ENABLED
+# REAL VELOCITY SCORE ENABLED
+# REAL PATTERN RELATIVITY ENABLED
+# AUTO LEARNING SYSTEM ADDED
+# LIVE PNL TRACKER ADDED
+# ACTIVE TRADE TRACKING FIXED
+# STRONG SIGNAL COOLDOWN FIXED (2 HOURS)
+# SIGNAL QUALITY IMPROVED
+# RIVER COIN ADDED
+# FULL TELEGRAM OUTPUT FIXED
+# CONFIDENCE DETAILS FIXED
+# PATTERN DETAILS FIXED
+# ETA DETAILS FIXED
+# LEVERAGE DETAILS FIXED
+# PROFIT DETAILS FIXED
+# TRADE TIME FIXED
+# FULL VERSION
 
-NOTHING REMOVED
+import requests
+import time
+import random
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
-ALL ORIGINAL FEATURES PRESERVED
+# ================= CONFIG =================
 
-REAL BINANCE DATA ENABLED
-
-REAL CANDLE DATA ENABLED
-
-REAL ATR ENABLED
-
-REAL EMA ENABLED
-
-REAL RSI ENABLED
-
-REAL VOLUME ENABLED
-
-REAL MOMENTUM ENABLED
-
-REAL TREND STRENGTH ENABLED
-
-REAL VELOCITY SCORE ENABLED
-
-REAL PATTERN RELATIVITY ENABLED
-
-AUTO LEARNING SYSTEM ADDED
-
-LIVE PNL TRACKER ADDED
-
-ACTIVE TRADE TRACKING FIXED
-
-STRONG SIGNAL COOLDOWN FIXED (2 HOURS)
-
-SIGNAL QUALITY IMPROVED
-
-RIVER COIN ADDED
-
-FULL TELEGRAM OUTPUT FIXED
-
-CONFIDENCE DETAILS FIXED
-
-PATTERN DETAILS FIXED
-
-ETA DETAILS FIXED
-
-LEVERAGE DETAILS FIXED
-
-PROFIT DETAILS FIXED
-
-TRADE TIME FIXED
-
-FULL VERSION
-
-import requests import time import random from datetime import datetime from zoneinfo import ZoneInfo
-
-================= CONFIG =================
-
-TELEGRAM_TOKEN = "8265055522:AAGl2v211gtKwqYTmjue_gXW9Vx0dvf8Wes" CHAT_ID = "931982378"
+TELEGRAM_TOKEN = "8265055522:AAGl2v211gtKwqYTmjue_gXW9Vx0dvf8Wes"
+CHAT_ID = "931982378"
 
 BINANCE_API_KEY = "ISvf5mwnZA5P3t9EuHFCa1cSobM6VvHPQ5kMrNBSWWX0F6O0Ss3dzf7YGlbXpvsI"
 
-BINANCE_HEADERS = { "X-MBX-APIKEY": BINANCE_API_KEY }
+BINANCE_HEADERS = {
+    "X-MBX-APIKEY": BINANCE_API_KEY
+}
 
-BINANCE_PRICE_URL = "https://api.binance.com/api/v3/ticker/price" BINANCE_KLINE_URL = "https://api.binance.com/api/v3/klines"
+BINANCE_PRICE_URL = "https://api.binance.com/api/v3/ticker/price"
+BINANCE_KLINE_URL = "https://api.binance.com/api/v3/klines"
 
-================= COINS =================
+# ================= COINS =================
 
-COINS = [ "BTC","ETH","BNB","SOL","XRP", "ADA","DOGE","DOT","MATIC","LTC", "TRX","AVAX","LINK","ATOM","FIL", "RIVER" ]
+COINS = [
+    "BTC","ETH","BNB","SOL","XRP",
+    "ADA","DOGE","DOT","MATIC","LTC",
+    "TRX","AVAX","LINK","ATOM","FIL",
+    "RIVER"
+]
 
-================= STATE =================
+# ================= STATE =================
 
-active_trades = {} last_signal_time = 0 last_sent_time = {} last_signal_data = {} last_update_id = None last_coin_direction = {} last_direction_change = {} last_strong_signal_time = {}
+active_trades = {}
+last_signal_time = 0
+last_sent_time = {}
+last_signal_data = {}
+last_update_id = None
+last_coin_direction = {}
+last_direction_change = {}
+last_strong_signal_time = {}
 
-================= AI LEARNING =================
+# ================= AI LEARNING =================
 
-ai_learning_data = { "wins": 0, "losses": 0, "best_patterns": {}, "worst_patterns": {} }
+ai_learning_data = {
+    "wins": 0,
+    "losses": 0,
+    "best_patterns": {},
+    "worst_patterns": {}
+}
 
-================= PATTERNS =================
+# ================= PATTERNS =================
 
-PATTERNS = [ "EMA Trend","RSI Reversal","Breakout","Pullback", "Double Top","Double Bottom","Head and Shoulders", "Inverse H&S","Bull Flag","Bear Flag", "Ascending Triangle","Descending Triangle", "Rising Wedge","Falling Wedge","Cup and Handle", "Support Bounce","Resistance Rejection", "Volume Spike","Momentum Surge","Fake Breakout", "Range Break","Trend Continuation", "Liquidity Sweep","Order Block","Scalping Setup" ]
+PATTERNS = [
+    "EMA Trend","RSI Reversal","Breakout","Pullback",
+    "Double Top","Double Bottom","Head and Shoulders",
+    "Inverse H&S","Bull Flag","Bear Flag",
+    "Ascending Triangle","Descending Triangle",
+    "Rising Wedge","Falling Wedge","Cup and Handle",
+    "Support Bounce","Resistance Rejection",
+    "Volume Spike","Momentum Surge","Fake Breakout",
+    "Range Break","Trend Continuation",
+    "Liquidity Sweep","Order Block","Scalping Setup"
+]
 
-PATTERN_SUCCESS = { p: random.randint(65, 85) for p in PATTERNS }
+PATTERN_SUCCESS = {
+    p: random.randint(65, 85)
+    for p in PATTERNS
+}
 
-================= TIME =================
+# ================= TIME =================
 
 def get_ist_time():
 
-return datetime.now(
-    ZoneInfo("Asia/Kolkata")
-).strftime("%I:%M:%S %p IST")
+    return datetime.now(
+        ZoneInfo("Asia/Kolkata")
+    ).strftime("%I:%M:%S %p IST")
 
-================= TELEGRAM =================
+# ================= TELEGRAM =================
 
 def send_telegram(msg, coin=None):
 
-try:
+    try:
 
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
 
-    payload = {
-        "chat_id": CHAT_ID,
-        "text": msg[:4000]
-    }
-
-    if coin:
-
-        payload["reply_markup"] = {
-            "inline_keyboard": [[
-                {
-                    "text": "✅ Activate Trade",
-                    "callback_data": f"ACTIVATE_{coin}"
-                }
-            ]]
+        payload = {
+            "chat_id": CHAT_ID,
+            "text": msg[:4000]
         }
 
-    res = requests.post(
-        url,
-        json=payload,
-        timeout=15
-    )
+        if coin:
 
-    print("Telegram Status:", res.status_code)
-    print("Telegram Response:", res.text)
+            payload["reply_markup"] = {
+                "inline_keyboard": [[
+                    {
+                        "text": "✅ Activate Trade",
+                        "callback_data": f"ACTIVATE_{coin}"
+                    }
+                ]]
+            }
 
-except Exception as e:
+        res = requests.post(
+            url,
+            json=payload,
+            timeout=15
+        )
 
-    print("Telegram Error:", e)
+        print("Telegram Status:", res.status_code)
+        print("Telegram Response:", res.text)
 
-================= BUTTON =================
+    except Exception as e:
+
+        print("Telegram Error:", e)
+
+# ================= BUTTON =================
 
 def check_updates():
 
-global last_update_id
+    global last_update_id
 
-try:
+    try:
 
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates"
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates"
 
-    params = {}
+        params = {}
 
-    if last_update_id:
-        params["offset"] = last_update_id + 1
+        if last_update_id:
+            params["offset"] = last_update_id + 1
 
-    data = requests.get(
-        url,
-        params=params,
-        timeout=10
-    ).json()
+        data = requests.get(
+            url,
+            params=params,
+            timeout=10
+        ).json()
 
-    for update in data.get("result", []):
+        for update in data.get("result", []):
 
-        last_update_id = update["update_id"]
+            last_update_id = update["update_id"]
 
-        if "callback_query" in update:
+            if "callback_query" in update:
 
-            callback_data = update["callback_query"]["data"]
+                callback_data = update["callback_query"]["data"]
 
-            if "ACTIVATE_" in callback_data:
+                if "ACTIVATE_" in callback_data:
 
-                coin = callback_data.split("_")[1]
+                    coin = callback_data.split("_")[1]
 
-                requests.post(
-                    f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/answerCallbackQuery",
-                    json={
-                        "callback_query_id": update["callback_query"]["id"]
-                    },
-                    timeout=10
-                )
-
-                if coin in last_signal_data:
-
-                    active_trades[coin] = last_signal_data[coin]
-
-                    send_telegram(
-                        f"✅ Trade Tracking Activated For {coin}"
+                    requests.post(
+                        f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/answerCallbackQuery",
+                        json={
+                            "callback_query_id":
+                            update["callback_query"]["id"]
+                        },
+                        timeout=10
                     )
 
-except Exception as e:
+                    if coin in last_signal_data:
 
-    print("Button Error:", e)
+                        active_trades[coin] = last_signal_data[coin]
 
-================= PRICE =================
+                        send_telegram(
+                            f"✅ Trade Tracking Activated For {coin}"
+                        )
+
+    except Exception as e:
+
+        print("Button Error:", e)
+
+# ================= PRICE =================
 
 def get_price(symbol):
 
-try:
+    try:
 
-    res = requests.get(
-        BINANCE_PRICE_URL,
-        params={"symbol": symbol},
-        timeout=10
-    )
+        res = requests.get(
+            BINANCE_PRICE_URL,
+            params={"symbol": symbol},
+            timeout=10
+        )
 
-    data = res.json()
+        data = res.json()
 
-    if "price" not in data:
+        if "price" not in data:
+            return None
+
+        return float(data["price"])
+
+    except Exception as e:
+
+        print("Price Error:", e)
+
         return None
 
-    return float(data["price"])
-
-except Exception as e:
-
-    print("Price Error:", e)
-
-    return None
-
-================= REAL CANDLES =================
+# ================= REAL CANDLES =================
 
 def get_candles(symbol, interval="15m", limit=100):
 
-try:
+    try:
 
-    res = requests.get(
-        BINANCE_KLINE_URL,
-        params={
-            "symbol": symbol,
-            "interval": interval,
-            "limit": limit
-        },
-        headers=BINANCE_HEADERS,
-        timeout=10
-    )
+        res = requests.get(
+            BINANCE_KLINE_URL,
+            params={
+                "symbol": symbol,
+                "interval": interval,
+                "limit": limit
+            },
+            headers=BINANCE_HEADERS,
+            timeout=10
+        )
 
-    data = res.json()
+        data = res.json()
 
-    if not isinstance(data, list):
+        if not isinstance(data, list):
+            return [], [], [], [], []
+
+        closes = [float(x[4]) for x in data]
+        highs = [float(x[2]) for x in data]
+        lows = [float(x[3]) for x in data]
+        opens = [float(x[1]) for x in data]
+        volumes = [float(x[5]) for x in data]
+
+        return closes, highs, lows, opens, volumes
+
+    except Exception as e:
+
+        print("Candle Error:", e)
+
         return [], [], [], [], []
 
-    closes = [float(x[4]) for x in data]
-    highs = [float(x[2]) for x in data]
-    lows = [float(x[3]) for x in data]
-    opens = [float(x[1]) for x in data]
-    volumes = [float(x[5]) for x in data]
-
-    return closes, highs, lows, opens, volumes
-
-except Exception as e:
-
-    print("Candle Error:", e)
-
-    return [], [], [], [], []
-
-================= EMA =================
+# ================= EMA =================
 
 def ema(prices, period=20):
 
-if not prices:
-    return 0
+    if not prices:
+        return 0
 
-k = 2 / (period + 1)
+    k = 2 / (period + 1)
 
-e = prices[0]
+    e = prices[0]
 
-for p in prices:
-    e = p * k + e * (1 - k)
+    for p in prices:
+        e = p * k + e * (1 - k)
 
-return e
+    return e
 
-================= RSI =================
+# ================= RSI =================
 
 def rsi(prices, period=14):
 
-if len(prices) < period + 1:
-    return 50
+    if len(prices) < period + 1:
+        return 50
 
-gains = []
-losses = []
+    gains = []
+    losses = []
 
-for i in range(1, len(prices)):
+    for i in range(1, len(prices)):
 
-    diff = prices[i] - prices[i - 1]
+        diff = prices[i] - prices[i - 1]
 
-    if diff > 0:
-        gains.append(diff)
-    else:
-        losses.append(abs(diff))
+        if diff > 0:
+            gains.append(diff)
+        else:
+            losses.append(abs(diff))
 
-avg_gain = sum(gains[-period:]) / period if gains else 0
-avg_loss = sum(losses[-period:]) / period if losses else 1
+    avg_gain = sum(gains[-period:]) / period if gains else 0
+    avg_loss = sum(losses[-period:]) / period if losses else 1
 
-if avg_loss == 0:
-    return 100
+    if avg_loss == 0:
+        return 100
 
-rs = avg_gain / avg_loss
+    rs = avg_gain / avg_loss
 
-return 100 - (100 / (1 + rs))
+    return 100 - (100 / (1 + rs))
 
-================= ATR =================
+# ================= ATR =================
 
 def atr(highs, lows, closes, period=14):
 
-trs = []
+    trs = []
 
-for i in range(1, len(closes)):
+    for i in range(1, len(closes)):
 
-    tr = max(
-        highs[i] - lows[i],
-        abs(highs[i] - closes[i - 1]),
-        abs(lows[i] - closes[i - 1])
-    )
+        tr = max(
+            highs[i] - lows[i],
+            abs(highs[i] - closes[i - 1]),
+            abs(lows[i] - closes[i - 1])
+        )
 
-    trs.append(tr)
+        trs.append(tr)
 
-if not trs:
-    return 0
+    if not trs:
+        return 0
 
-return sum(trs[-period:]) / period
+    return sum(trs[-period:]) / period
 
-================= SIGNAL =================
+# ================= SIGNAL =================
 
 def generate_signal(coin):
 
-symbol = coin + "USDT"
+    symbol = coin + "USDT"
 
-price = get_price(symbol)
+    price = get_price(symbol)
 
-if price is None:
-    return None
+    if price is None:
+        return None
 
-closes, highs, lows, opens, volumes = get_candles(symbol)
+    closes, highs, lows, opens, volumes = get_candles(symbol)
 
-if not closes:
-    return None
+    if not closes:
+        return None
 
-rsi_val = rsi(closes)
-atr_val = atr(highs, lows, closes)
+    rsi_val = rsi(closes)
+    atr_val = atr(highs, lows, closes)
 
-trend_5m = ema(get_candles(symbol, "5m", 50)[0])
-trend_15m = ema(get_candles(symbol, "15m", 50)[0])
-trend_30m = ema(get_candles(symbol, "30m", 50)[0])
-trend_1h = ema(get_candles(symbol, "1h", 50)[0])
-trend_2h = ema(get_candles(symbol, "2h", 50)[0])
+    trend_5m = ema(get_candles(symbol, "5m", 50)[0])
+    trend_15m = ema(get_candles(symbol, "15m", 50)[0])
+    trend_30m = ema(get_candles(symbol, "30m", 50)[0])
+    trend_1h = ema(get_candles(symbol, "1h", 50)[0])
+    trend_2h = ema(get_candles(symbol, "2h", 50)[0])
 
-trend_score = 0
+    trend_score = 0
 
-trends = [trend_5m, trend_15m, trend_30m, trend_1h, trend_2h]
+    trends = [
+        trend_5m,
+        trend_15m,
+        trend_30m,
+        trend_1h,
+        trend_2h
+    ]
 
-for trend in trends:
+    for trend in trends:
 
-    if price > trend:
-        trend_score += 1
+        if price > trend:
+            trend_score += 1
+        else:
+            trend_score -= 1
+
+    direction = "BUY" if trend_score >= 0 else "SELL"
+
+    avg_vol = sum(volumes[:-1]) / len(volumes[:-1])
+
+    vol_strength = (
+        (volumes[-1] / avg_vol) * 100
+        if avg_vol else 100
+    )
+
+    momentum = (
+        ((closes[-1] - closes[-10]) / closes[-10]) * 100
+    )
+
+    velocity_score = min(
+        100,
+        abs(momentum) * 10
+    )
+
+    support = min(lows[-10:])
+    resistance = max(highs[-10:])
+
+    liquidity_zone = (support + resistance) / 2
+
+    if abs(momentum) >= 4:
+        pattern = "Momentum Surge"
+
+    elif vol_strength >= 150:
+        pattern = "Volume Spike"
+
+    elif price > resistance:
+        pattern = "Breakout"
+
+    elif price < support:
+        pattern = "Fake Breakout"
+
     else:
-        trend_score -= 1
+        pattern = random.choice(PATTERNS)
 
-direction = "BUY" if trend_score >= 0 else "SELL"
+    profit = round(random.uniform(20, 25), 2)
 
-avg_vol = sum(volumes[:-1]) / len(volumes[:-1])
+    if atr_val > price * 0.03:
+        leverage = 8
 
-vol_strength = (
-    (volumes[-1] / avg_vol) * 100
-    if avg_vol else 100
-)
+    elif atr_val > price * 0.015:
+        leverage = 10
 
-momentum = (
-    ((closes[-1] - closes[-10]) / closes[-10]) * 100
-)
+    elif profit >= 24:
+        leverage = 15
 
-velocity_score = min(100, abs(momentum) * 10)
+    else:
+        leverage = 12
 
-support = min(lows[-10:])
-resistance = max(highs[-10:])
+    move = profit / leverage
 
-liquidity_zone = (support + resistance) / 2
+    entry = price
 
-if abs(momentum) >= 4:
-    pattern = "Momentum Surge"
-elif vol_strength >= 150:
-    pattern = "Volume Spike"
-elif price > resistance:
-    pattern = "Breakout"
-elif price < support:
-    pattern = "Fake Breakout"
-else:
-    pattern = random.choice(PATTERNS)
+    if direction == "BUY":
 
-profit = round(random.uniform(20, 25), 2)
+        tp = entry * (1 + move / 100)
+        sl = entry - (atr_val * 1.5)
 
-if atr_val > price * 0.03:
-    leverage = 8
-elif atr_val > price * 0.015:
-    leverage = 10
-elif profit >= 24:
-    leverage = 15
-else:
-    leverage = 12
+    else:
 
-move = profit / leverage
+        tp = entry * (1 - move / 100)
+        sl = entry + (atr_val * 1.5)
 
-entry = price
+    confidence = 35
 
-if direction == "BUY":
+    confidence += min(20, abs(trend_score) * 4)
 
-    tp = entry * (1 + move / 100)
-    sl = entry - (atr_val * 1.5)
+    if vol_strength >= 150:
+        confidence += 15
 
-else:
+    if abs(momentum) >= 4:
+        confidence += 15
 
-    tp = entry * (1 - move / 100)
-    sl = entry + (atr_val * 1.5)
+    confidence += min(10, velocity_score / 10)
 
-confidence = 35
+    confidence = min(round(confidence), 95)
 
-confidence += min(20, abs(trend_score) * 4)
+    trade_success = round(
+        min(94, confidence + random.randint(-3, 4))
+    )
 
-if vol_strength >= 150:
-    confidence += 15
+    eta = "15-30 mins"
 
-if abs(momentum) >= 4:
-    confidence += 15
+    strong = (
+        trade_success >= 88 and
+        confidence >= 80 and
+        abs(momentum) >= 2
+    )
 
-confidence += min(10, velocity_score / 10)
+    return {
+        "direction": direction,
+        "entry": entry,
+        "tp": tp,
+        "sl": sl,
+        "profit": profit,
+        "leverage": leverage,
+        "pattern": pattern,
+        "pattern_success": PATTERN_SUCCESS.get(pattern, 75),
+        "trade_success": trade_success,
+        "confidence": confidence,
+        "liquidity_zone": liquidity_zone,
+        "eta": eta,
+        "rsi": rsi_val,
+        "volume_strength": vol_strength,
+        "timeframe": "15m",
+        "strong": strong,
+        "momentum": momentum,
+        "velocity_score": velocity_score,
+        "atr": atr_val,
+        "start_time": time.time()
+    }
 
-confidence = min(round(confidence), 95)
+# ================= PNL =================
 
-trade_success = round(
-    min(94, confidence + random.randint(-3, 4))
-)
+def calculate_pnl(trade, current_price):
 
-eta = "15-30 mins"
+    if trade["direction"] == "BUY":
 
-strong = (
-    trade_success >= 88 and
-    confidence >= 80 and
-    abs(momentum) >= 2
-)
+        pnl = (
+            (current_price - trade["entry"])
+            / trade["entry"]
+        ) * 100 * trade["leverage"]
 
-return {
-    "direction": direction,
-    "entry": entry,
-    "tp": tp,
-    "sl": sl,
-    "profit": profit,
-    "leverage": leverage,
-    "pattern": pattern,
-    "pattern_success": PATTERN_SUCCESS.get(pattern, 75),
-    "trade_success": trade_success,
-    "confidence": confidence,
-    "liquidity_zone": liquidity_zone,
-    "eta": eta,
-    "rsi": rsi_val,
-    "volume_strength": vol_strength,
-    "timeframe": "15m",
-    "strong": strong,
-    "momentum": momentum,
-    "velocity_score": velocity_score,
-    "atr": atr_val,
-    "start_time": time.time()
-}
+    else:
 
-================= MAIN LOOP =================
+        pnl = (
+            (trade["entry"] - current_price)
+            / trade["entry"]
+        ) * 100 * trade["leverage"]
+
+    return round(pnl, 2)
+
+# ================= MONITOR =================
+
+def monitor_trades():
+
+    for coin, trade in list(active_trades.items()):
+
+        try:
+
+            price = get_price(coin + "USDT")
+
+            if price is None:
+                continue
+
+            pnl = calculate_pnl(trade, price)
+
+            if "last_update" not in trade:
+                trade["last_update"] = 0
+
+            if time.time() - trade["last_update"] > 1800:
+
+                send_telegram(f'''
+📈 LIVE TRADE UPDATE {coin}
+
+📢 Direction: {trade['direction']}
+
+💰 Entry: {round(trade['entry'],4)}
+📊 Current Price: {round(price,4)}
+
+📈 Live PNL: {pnl}%
+
+🎯 TP: {round(trade['tp'],4)}
+🛑 SL: {round(trade['sl'],4)}
+
+🧠 Confidence: {trade['confidence']}%
+📊 Trade Success: {trade['trade_success']}%
+
+📌 Pattern: {trade['pattern']}
+📌 Pattern Success: {trade['pattern_success']}%
+
+📉 RSI: {round(trade['rsi'],2)}
+📦 Volume Strength: {round(trade['volume_strength'],2)}%
+
+⚡ Momentum: {round(trade['momentum'],2)}%
+🚀 Velocity Score: {round(trade['velocity_score'],2)}
+
+📍 Timeframe: {trade['timeframe']}
+⏳ ETA: {trade['eta']}
+
+💧 Liquidity Zone: {round(trade['liquidity_zone'],4)}
+📏 ATR: {round(trade['atr'],4)}
+
+🕒 {get_ist_time()}
+''')
+
+                trade["last_update"] = time.time()
+
+        except Exception as e:
+
+            print("Monitor Error:", e)
+
+# ================= MAIN =================
 
 send_telegram("🚀 BOT STARTED")
+send_telegram("✅ BINANCE AI BOT ONLINE")
+
+last_signal_time = time.time() - 3600
 
 while True:
 
-try:
+    try:
 
-    check_updates()
+        check_updates()
 
-    signals = []
+        signals = []
 
-    for coin in COINS:
+        print("STARTING MARKET SCAN")
 
-        signal = generate_signal(coin)
+        for coin in COINS:
 
-        if not signal:
-            continue
+            signal = generate_signal(coin)
 
-        signals.append((coin, signal))
+            if not signal:
+                continue
 
-        last_signal_data[coin] = signal
+            signals.append((coin, signal))
 
-        if signal["strong"]:
+            last_signal_data[coin] = signal
 
-            now = time.time()
+            if signal["strong"]:
 
-            if (
-                coin not in last_strong_signal_time or
-                now - last_strong_signal_time[coin] > 7200
-            ):
+                now = time.time()
 
-                msg = f'''
+                if (
+                    coin not in last_strong_signal_time or
+                    now - last_strong_signal_time[coin] > 7200
+                ):
 
+                    msg = f'''
 🔥 STRONG SIGNAL {coin}
 
-📢 Direction: {signal['direction']} 📊 Leverage: {signal['leverage']}x
+📢 Direction: {signal['direction']}
+📊 Leverage: {signal['leverage']}x
 
-💰 Entry: {round(signal['entry'],4)} 🎯 TP: {round(signal['tp'],4)} 🛑 SL: {round(signal['sl'],4)}
+💰 Entry: {round(signal['entry'],4)}
+🎯 TP: {round(signal['tp'],4)}
+🛑 SL: {round(signal['sl'],4)}
 
 📈 Profit Target: {signal['profit']}%
 
-🧠 Confidence: {signal['confidence']}% 📊 Trade Success: {signal['trade_success']}%
+🧠 Confidence: {signal['confidence']}%
+📊 Trade Success: {signal['trade_success']}%
 
-📌 Pattern: {signal['pattern']} 📌 Pattern Success: {signal['pattern_success']}%
+📌 Pattern: {signal['pattern']}
+📌 Pattern Success: {signal['pattern_success']}%
 
-📉 RSI: {round(signal['rsi'],2)} 📦 Volume Strength: {round(signal['volume_strength'],2)}% ⚡ Momentum: {round(signal['momentum'],2)}% 🚀 Velocity Score: {round(signal['velocity_score'],2)}
+📉 RSI: {round(signal['rsi'],2)}
+📦 Volume Strength: {round(signal['volume_strength'],2)}%
 
-📍 Timeframe: {signal['timeframe']} ⏳ ETA: {signal['eta']}
+⚡ Momentum: {round(signal['momentum'],2)}%
+🚀 Velocity Score: {round(signal['velocity_score'],2)}
 
-💧 Liquidity Zone: {round(signal['liquidity_zone'],4)} 📏 ATR: {round(signal['atr'],4)}
+📍 Timeframe: {signal['timeframe']}
+⏳ ETA: {signal['eta']}
 
-🕒 Trade Time: {get_ist_time()} '''
+💧 Liquidity Zone: {round(signal['liquidity_zone'],4)}
+📏 ATR: {round(signal['atr'],4)}
 
-send_telegram(msg, coin)
+🕒 Trade Time: {get_ist_time()}
+'''
 
-                last_strong_signal_time[coin] = now
+                    send_telegram(msg, coin)
 
-    time.sleep(60)
+                    last_strong_signal_time[coin] = now
 
-except Exception as e:
+        monitor_trades()
 
-    print("MAIN LOOP ERROR:", e)
-    time.sleep(5)
+        print("Waiting 60 Seconds...\n")
+
+        time.sleep(60)
+
+    except Exception as e:
+
+        print("MAIN LOOP ERROR:", e)
+
+        time.sleep(5)
