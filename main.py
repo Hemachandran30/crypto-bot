@@ -1,8 +1,8 @@
-# ================= MULTI TIMEFRAME UPGRADED VERSION =================
-# FINAL BINANCE AI VERSION - TEST MODE
+# ================= BINANCE VISION API - FULL VERSION =================
 # COINS: BTC ONLY
 # SCAN INTERVAL: 5 MINUTES
-# ALL ORIGINAL FEATURES PRESERVED
+# ALL 25 PATTERNS + ORIGINAL LOGIC PRESERVED
+# NO GEOBLOCK - USES data-api.binance.vision
 
 import requests
 import time
@@ -15,17 +15,12 @@ from zoneinfo import ZoneInfo
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "8265055522:AAGl2v211gtKwqYTmjue_gXW9Vx0dvf8Wes")
 CHAT_ID = os.getenv("CHAT_ID", "931982378")
-BINANCE_API_KEY = os.getenv("BINANCE_API_KEY", "ISvf5mwnZA5P3t9EuHFCa1cSobM6VvHPQ5kMrNBSWWX0F6O0Ss3dzf7YGlbXpvsI")
 
-BINANCE_HEADERS = {
-    "X-MBX-APIKEY": BINANCE_API_KEY
-}
-
-BINANCE_PRICE_URL = "https://api.binance.com/api/v3/ticker/price"
-BINANCE_KLINE_URL = "https://api.binance.com/api/v3/klines"
+# USING BINANCE VISION API - NO KEY NEEDED FOR PUBLIC DATA
+BINANCE_PRICE_URL = "https://data-api.binance.vision/api/v3/ticker/price"
+BINANCE_KLINE_URL = "https://data-api.binance.vision/api/v3/klines"
 
 # ================= COINS =================
-# TEST MODE: BTC ONLY
 COINS = ["BTC"]
 
 # ================= STATE =================
@@ -132,7 +127,7 @@ def check_updates():
                         timeout=10
                     )
                     if coin in last_signal_data:
-                        active_trades[coin] = last_signal_data[coin]
+                        active_trades = last_signal_data
                         send_telegram(
                             f"✅ Trade Tracking Activated For {coin}"
                         )
@@ -146,7 +141,6 @@ def get_price(symbol):
         res = requests.get(
             BINANCE_PRICE_URL,
             params={"symbol": symbol},
-            headers=BINANCE_HEADERS,
             timeout=10
         )
         print(f"[{get_ist_time()}] {symbol} Price Status: {res.status_code}")
@@ -172,7 +166,6 @@ def get_candles(symbol, interval="15m", limit=100):
                 "interval": interval,
                 "limit": limit
             },
-            headers=BINANCE_HEADERS,
             timeout=10
         )
         print(f"[{get_ist_time()}] {symbol} {interval} Candle Status: {res.status_code}")
@@ -436,8 +429,8 @@ def monitor_trades():
 
 # ================= MAIN =================
 
-send_telegram("🚀 BOT STARTED - TEST MODE")
-send_telegram("✅ BINANCE AI BOT ONLINE | BTC ONLY | 5 MIN SCAN")
+send_telegram("🚀 BOT STARTED - BINANCE VISION API")
+send_telegram("✅ BINANCE AI BOT ONLINE | BTC ONLY | 5 MIN SCAN | ALL PATTERNS ACTIVE")
 
 last_signal_time = time.time() - 3600
 
@@ -452,9 +445,9 @@ while True:
             if not signal:
                 continue
             signals.append((coin, signal))
-            last_signal_data[coin] = signal
+            last_signal_data = signal
 
-            # Send ALL signals in test mode, not just strong
+            # TEST MODE: Send ALL signals, not just strong
             msg = f'''
 🔥 TEST SIGNAL {coin}
 
@@ -489,19 +482,18 @@ while True:
 '''
             send_telegram(msg, coin)
 
-            # Still respect strong signal cooldown
             if signal["strong"]:
                 now = time.time()
                 if (
                     coin not in last_strong_signal_time or
-                    now - last_strong_signal_time[coin] > 7200
+                    now - last_strong_signal_time > 7200
                 ):
-                    last_strong_signal_time[coin] = now
+                    last_strong_signal_time = now
 
         monitor_trades()
 
         print(f"[{get_ist_time()}] Waiting 5 Minutes...\n")
-        time.sleep(300) # CHANGED: 5 MINUTES = 300 SECONDS
+        time.sleep(300) # 5 MINUTES
 
     except Exception as e:
         print("MAIN LOOP ERROR:", e)
