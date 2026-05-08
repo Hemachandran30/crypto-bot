@@ -1,8 +1,8 @@
-# ================= BINANCE VISION API - FULL VERSION =================
-# COINS: BTC ONLY
-# SCAN INTERVAL: 5 MINUTES
-# ALL 25 PATTERNS + ORIGINAL LOGIC PRESERVED
-# NO GEOBLOCK - USES data-api.binance.vision
+# ================= BINANCE VISION API - FINAL MULTI COIN TEST =================
+# COINS: 15 MAJOR COINS
+# SCAN INTERVAL: 30 MINUTES
+# FILTER: CONFIDENCE >= 75% AND TRADE SUCCESS >= 75%
+# LOGICAL ETA + ALL 25 PATTERNS PRESERVED
 
 import requests
 import time
@@ -16,12 +16,22 @@ from zoneinfo import ZoneInfo
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "8265055522:AAGl2v211gtKwqYTmjue_gXW9Vx0dvf8Wes")
 CHAT_ID = os.getenv("CHAT_ID", "931982378")
 
-# USING BINANCE VISION API - NO KEY NEEDED FOR PUBLIC DATA
+# BINANCE VISION API - NO GEOBLOCK, NO API KEY NEEDED
 BINANCE_PRICE_URL = "https://data-api.binance.vision/api/v3/ticker/price"
 BINANCE_KLINE_URL = "https://data-api.binance.vision/api/v3/klines"
 
 # ================= COINS =================
-COINS = ["BTC"]
+# RESTORED FROM YOUR ORIGINAL CODE - 15 MAJOR COINS
+COINS = [
+    "BTC", "ETH", "BNB", "SOL", "XRP",
+    "DOGE", "ADA", "AVAX", "DOT", "LINK",
+    "MATIC", "LTC", "BCH", "UNI", "ATOM"
+]
+
+# ================= FILTERS =================
+MIN_CONFIDENCE = 75 # Only send if confidence >= 75%
+MIN_TRADE_SUCCESS = 75 # Only send if trade success >= 75%
+SCAN_INTERVAL = 1800 # 30 MINUTES = 1800 SECONDS
 
 # ================= STATE =================
 
@@ -240,7 +250,8 @@ def generate_signal(coin):
         print(f"[{get_ist_time()}] {coin}: No price data")
         return None
 
-    closes, highs, lows, opens, volumes = get_candles(symbol)
+    base_interval = "15m" # Primary timeframe for this signal
+    closes, highs, lows, opens, volumes = get_candles(symbol, base_interval)
     if not closes:
         print(f"[{get_ist_time()}] {coin}: No candle data")
         return None
@@ -332,7 +343,37 @@ def generate_signal(coin):
     trade_success = round(
         min(94, confidence + random.randint(-3, 4))
     )
-    eta = "15-30 mins"
+
+    # ================ LOGICAL ETA CALCULATION ================
+    distance_to_tp = abs(tp - entry)
+    avg_candle_move = atr_val if atr_val > 0 else 1
+
+    candles_needed = distance_to_tp / avg_candle_move
+
+    # Adjust for momentum
+    if abs(momentum) >= 4:
+        candles_needed *= 0.6
+    elif abs(momentum) >= 2:
+        candles_needed *= 0.8
+    elif abs(momentum) < 0.5:
+        candles_needed *= 1.5
+
+    tf_minutes = {"5m": 5, "15m": 15, "30m": 30, "1h": 60, "2h": 120}
+    minutes_needed = candles_needed * tf_minutes.get(base_interval, 15)
+
+    if minutes_needed < 15:
+        eta = "5-15 mins"
+    elif minutes_needed < 30:
+        eta = "15-30 mins"
+    elif minutes_needed < 60:
+        eta = "30-60 mins"
+    elif minutes_needed < 120:
+        eta = "1-2 hours"
+    elif minutes_needed < 240:
+        eta = "2-4 hours"
+    else:
+        eta = "4+ hours"
+    # ================ END ETA CALC ================
 
     strong = (
         trade_success >= 88 and
@@ -355,7 +396,7 @@ def generate_signal(coin):
         "eta": eta,
         "rsi": rsi_val,
         "volume_strength": vol_strength,
-        "timeframe": "15m",
+        "timeframe": base_interval,
         "strong": strong,
         "momentum": momentum,
         "velocity_score": velocity_score,
@@ -429,27 +470,32 @@ def monitor_trades():
 
 # ================= MAIN =================
 
-send_telegram("🚀 BOT STARTED - BINANCE VISION API")
-send_telegram("✅ BINANCE AI BOT ONLINE | BTC ONLY | 5 MIN SCAN | ALL PATTERNS ACTIVE")
+send_telegram("🚀 BOT STARTED - FINAL MULTI COIN TEST")
+send_telegram(f"✅ 15 COINS ACTIVE | 30 MIN SCAN | MIN CONFIDENCE: {MIN_CONFIDENCE}% | MIN SUCCESS: {MIN_TRADE_SUCCESS}%")
 
 last_signal_time = time.time() - 3600
 
 while True:
     try:
         check_updates()
-        signals = []
-        print(f"[{get_ist_time()}] STARTING MARKET SCAN - BTC ONLY")
+        print(f"[{get_ist_time()}] STARTING MARKET SCAN - 15 COINS")
+        signals_sent = 0
 
         for coin in COINS:
             signal = generate_signal(coin)
             if not signal:
                 continue
-            signals.append((coin, signal))
-            last_signal_data = signal
 
-            # TEST MODE: Send ALL signals, not just strong
+            # FILTER: Only send if Confidence >= 75 AND Trade Success >= 75
+            if signal["confidence"] < MIN_CONFIDENCE or signal["trade_success"] < MIN_TRADE_SUCCESS:
+                print(f"[{get_ist_time()}] {coin} Skipped - Low Quality | Conf: {signal['confidence']}% | Success: {signal['trade_success']}%")
+                continue
+
+            last_signal_data = signal
+            signals_sent += 1
+
             msg = f'''
-🔥 TEST SIGNAL {coin}
+🔥 HIGH QUALITY SIGNAL {coin}
 
 📢 Direction: {signal['direction']}
 📊 Leverage: {signal['leverage']}x
@@ -481,19 +527,16 @@ while True:
 🕒 Trade Time: {get_ist_time()}
 '''
             send_telegram(msg, coin)
+            print(f"[{get_ist_time()}] {coin} HIGH QUALITY SIGNAL SENT | Conf: {signal['confidence']}%")
 
-            if signal["strong"]:
-                now = time.time()
-                if (
-                    coin not in last_strong_signal_time or
-                    now - last_strong_signal_time > 7200
-                ):
-                    last_strong_signal_time = now
+        if signals_sent == 0:
+            print(f"[{get_ist_time()}] No signals met 75%+ criteria this scan")
+            send_telegram(f"🔍 Scan complete. No 75%+ signals found across 15 coins. Next scan in 30 min.")
 
         monitor_trades()
 
-        print(f"[{get_ist_time()}] Waiting 5 Minutes...\n")
-        time.sleep(300) # 5 MINUTES
+        print(f"[{get_ist_time()}] Waiting 30 Minutes...\n")
+        time.sleep(SCAN_INTERVAL) # 30 MINUTES
 
     except Exception as e:
         print("MAIN LOOP ERROR:", e)
