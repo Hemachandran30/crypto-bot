@@ -1,44 +1,21 @@
 # ================= MULTI TIMEFRAME UPGRADED VERSION =================
-# FINAL BINANCE AI VERSION
-# NOTHING REMOVED
+# FINAL BINANCE AI VERSION - TEST MODE
+# COINS: BTC ONLY
+# SCAN INTERVAL: 5 MINUTES
 # ALL ORIGINAL FEATURES PRESERVED
-# REAL BINANCE DATA ENABLED
-# REAL CANDLE DATA ENABLED
-# REAL ATR ENABLED
-# REAL EMA ENABLED
-# REAL RSI ENABLED
-# REAL VOLUME ENABLED
-# REAL MOMENTUM ENABLED
-# REAL TREND STRENGTH ENABLED
-# REAL VELOCITY SCORE ENABLED
-# REAL PATTERN RELATIVITY ENABLED
-# AUTO LEARNING SYSTEM ADDED
-# LIVE PNL TRACKER ADDED
-# ACTIVE TRADE TRACKING FIXED
-# STRONG SIGNAL COOLDOWN FIXED (2 HOURS)
-# SIGNAL QUALITY IMPROVED
-# RIVER COIN ADDED
-# FULL TELEGRAM OUTPUT FIXED
-# CONFIDENCE DETAILS FIXED
-# PATTERN DETAILS FIXED
-# ETA DETAILS FIXED
-# LEVERAGE DETAILS FIXED
-# PROFIT DETAILS FIXED
-# TRADE TIME FIXED
-# FULL VERSION
 
 import requests
 import time
 import random
+import os
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
 # ================= CONFIG =================
 
-TELEGRAM_TOKEN = "8265055522:AAGl2v211gtKwqYTmjue_gXW9Vx0dvf8Wes"
-CHAT_ID = "931982378"
-
-BINANCE_API_KEY = "ISvf5mwnZA5P3t9EuHFCa1cSobM6VvHPQ5kMrNBSWWX0F6O0Ss3dzf7YGlbXpvsI"
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "8265055522:AAGl2v211gtKwqYTmjue_gXW9Vx0dvf8Wes")
+CHAT_ID = os.getenv("CHAT_ID", "931982378")
+BINANCE_API_KEY = os.getenv("BINANCE_API_KEY", "ISvf5mwnZA5P3t9EuHFCa1cSobM6VvHPQ5kMrNBSWWX0F6O0Ss3dzf7YGlbXpvsI")
 
 BINANCE_HEADERS = {
     "X-MBX-APIKEY": BINANCE_API_KEY
@@ -48,13 +25,8 @@ BINANCE_PRICE_URL = "https://api.binance.com/api/v3/ticker/price"
 BINANCE_KLINE_URL = "https://api.binance.com/api/v3/klines"
 
 # ================= COINS =================
-
-COINS = [
-    "BTC","ETH","BNB","SOL","XRP",
-    "ADA","DOGE","DOT","MATIC","LTC",
-    "TRX","AVAX","LINK","ATOM","FIL",
-    "RIVER"
-]
+# TEST MODE: BTC ONLY
+COINS = ["BTC"]
 
 # ================= STATE =================
 
@@ -98,7 +70,6 @@ PATTERN_SUCCESS = {
 # ================= TIME =================
 
 def get_ist_time():
-
     return datetime.now(
         ZoneInfo("Asia/Kolkata")
     ).strftime("%I:%M:%S %p IST")
@@ -106,18 +77,13 @@ def get_ist_time():
 # ================= TELEGRAM =================
 
 def send_telegram(msg, coin=None):
-
     try:
-
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-
         payload = {
             "chat_id": CHAT_ID,
             "text": msg[:4000]
         }
-
         if coin:
-
             payload["reply_markup"] = {
                 "inline_keyboard": [[
                     {
@@ -126,53 +92,37 @@ def send_telegram(msg, coin=None):
                     }
                 ]]
             }
-
         res = requests.post(
             url,
             json=payload,
             timeout=15
         )
-
         print("Telegram Status:", res.status_code)
-        print("Telegram Response:", res.text)
-
+        if res.status_code!= 200:
+            print("Telegram Response:", res.text)
     except Exception as e:
-
         print("Telegram Error:", e)
 
 # ================= BUTTON =================
 
 def check_updates():
-
     global last_update_id
-
     try:
-
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates"
-
         params = {}
-
         if last_update_id:
             params["offset"] = last_update_id + 1
-
         data = requests.get(
             url,
             params=params,
             timeout=10
         ).json()
-
         for update in data.get("result", []):
-
             last_update_id = update["update_id"]
-
             if "callback_query" in update:
-
                 callback_data = update["callback_query"]["data"]
-
                 if "ACTIVATE_" in callback_data:
-
                     coin = callback_data.split("_")[1]
-
                     requests.post(
                         f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/answerCallbackQuery",
                         json={
@@ -181,50 +131,40 @@ def check_updates():
                         },
                         timeout=10
                     )
-
                     if coin in last_signal_data:
-
                         active_trades[coin] = last_signal_data[coin]
-
                         send_telegram(
                             f"✅ Trade Tracking Activated For {coin}"
                         )
-
     except Exception as e:
-
         print("Button Error:", e)
 
 # ================= PRICE =================
 
 def get_price(symbol):
-
     try:
-
         res = requests.get(
             BINANCE_PRICE_URL,
             params={"symbol": symbol},
+            headers=BINANCE_HEADERS,
             timeout=10
         )
-
+        print(f"[{get_ist_time()}] {symbol} Price Status: {res.status_code}")
+        if res.status_code!= 200:
+            print(f"Price Error Body: {res.text}")
+            return None
         data = res.json()
-
         if "price" not in data:
             return None
-
         return float(data["price"])
-
     except Exception as e:
-
         print("Price Error:", e)
-
         return None
 
 # ================= REAL CANDLES =================
 
 def get_candles(symbol, interval="15m", limit=100):
-
     try:
-
         res = requests.get(
             BINANCE_KLINE_URL,
             params={
@@ -235,106 +175,81 @@ def get_candles(symbol, interval="15m", limit=100):
             headers=BINANCE_HEADERS,
             timeout=10
         )
-
+        print(f"[{get_ist_time()}] {symbol} {interval} Candle Status: {res.status_code}")
+        if res.status_code!= 200:
+            print(f"Candle Error Body: {res.text}")
+            return [], [], [], [], []
         data = res.json()
-
         if not isinstance(data, list):
             return [], [], [], [], []
-
         closes = [float(x[4]) for x in data]
         highs = [float(x[2]) for x in data]
         lows = [float(x[3]) for x in data]
         opens = [float(x[1]) for x in data]
         volumes = [float(x[5]) for x in data]
-
         return closes, highs, lows, opens, volumes
-
     except Exception as e:
-
         print("Candle Error:", e)
-
         return [], [], [], [], []
 
 # ================= EMA =================
 
 def ema(prices, period=20):
-
     if not prices:
         return 0
-
     k = 2 / (period + 1)
-
     e = prices[0]
-
     for p in prices:
         e = p * k + e * (1 - k)
-
     return e
 
 # ================= RSI =================
 
 def rsi(prices, period=14):
-
     if len(prices) < period + 1:
         return 50
-
     gains = []
     losses = []
-
     for i in range(1, len(prices)):
-
         diff = prices[i] - prices[i - 1]
-
         if diff > 0:
             gains.append(diff)
         else:
             losses.append(abs(diff))
-
     avg_gain = sum(gains[-period:]) / period if gains else 0
     avg_loss = sum(losses[-period:]) / period if losses else 1
-
     if avg_loss == 0:
         return 100
-
     rs = avg_gain / avg_loss
-
     return 100 - (100 / (1 + rs))
 
 # ================= ATR =================
 
 def atr(highs, lows, closes, period=14):
-
     trs = []
-
     for i in range(1, len(closes)):
-
         tr = max(
             highs[i] - lows[i],
             abs(highs[i] - closes[i - 1]),
             abs(lows[i] - closes[i - 1])
         )
-
         trs.append(tr)
-
     if not trs:
         return 0
-
     return sum(trs[-period:]) / period
 
 # ================= SIGNAL =================
 
 def generate_signal(coin):
-
     symbol = coin + "USDT"
-
     price = get_price(symbol)
-
     if price is None:
+        print(f"[{get_ist_time()}] {coin}: No price data")
         return None
 
     closes, highs, lows, opens, volumes = get_candles(symbol)
-
     if not closes:
+        print(f"[{get_ist_time()}] {coin}: No candle data")
         return None
 
     rsi_val = rsi(closes)
@@ -347,7 +262,6 @@ def generate_signal(coin):
     trend_2h = ema(get_candles(symbol, "2h", 50)[0])
 
     trend_score = 0
-
     trends = [
         trend_5m,
         trend_15m,
@@ -355,9 +269,7 @@ def generate_signal(coin):
         trend_1h,
         trend_2h
     ]
-
     for trend in trends:
-
         if price > trend:
             trend_score += 1
         else:
@@ -365,39 +277,32 @@ def generate_signal(coin):
 
     direction = "BUY" if trend_score >= 0 else "SELL"
 
-    avg_vol = sum(volumes[:-1]) / len(volumes[:-1])
-
+    avg_vol = sum(volumes[:-1]) / len(volumes[:-1]) if len(volumes) > 1 else volumes[-1]
     vol_strength = (
         (volumes[-1] / avg_vol) * 100
         if avg_vol else 100
     )
-
     momentum = (
         ((closes[-1] - closes[-10]) / closes[-10]) * 100
+        if len(closes) >= 10 else 0
     )
-
     velocity_score = min(
         100,
         abs(momentum) * 10
     )
 
-    support = min(lows[-10:])
-    resistance = max(highs[-10:])
-
+    support = min(lows[-10:]) if len(lows) >= 10 else lows[-1]
+    resistance = max(highs[-10:]) if len(highs) >= 10 else highs[-1]
     liquidity_zone = (support + resistance) / 2
 
     if abs(momentum) >= 4:
         pattern = "Momentum Surge"
-
     elif vol_strength >= 150:
         pattern = "Volume Spike"
-
     elif price > resistance:
         pattern = "Breakout"
-
     elif price < support:
         pattern = "Fake Breakout"
-
     else:
         pattern = random.choice(PATTERNS)
 
@@ -405,48 +310,35 @@ def generate_signal(coin):
 
     if atr_val > price * 0.03:
         leverage = 8
-
     elif atr_val > price * 0.015:
         leverage = 10
-
     elif profit >= 24:
         leverage = 15
-
     else:
         leverage = 12
 
     move = profit / leverage
-
     entry = price
 
     if direction == "BUY":
-
         tp = entry * (1 + move / 100)
         sl = entry - (atr_val * 1.5)
-
     else:
-
         tp = entry * (1 - move / 100)
         sl = entry + (atr_val * 1.5)
 
     confidence = 35
-
     confidence += min(20, abs(trend_score) * 4)
-
     if vol_strength >= 150:
         confidence += 15
-
     if abs(momentum) >= 4:
         confidence += 15
-
     confidence += min(10, velocity_score / 10)
-
     confidence = min(round(confidence), 95)
 
     trade_success = round(
         min(94, confidence + random.randint(-3, 4))
     )
-
     eta = "15-30 mins"
 
     strong = (
@@ -481,43 +373,30 @@ def generate_signal(coin):
 # ================= PNL =================
 
 def calculate_pnl(trade, current_price):
-
     if trade["direction"] == "BUY":
-
         pnl = (
             (current_price - trade["entry"])
             / trade["entry"]
         ) * 100 * trade["leverage"]
-
     else:
-
         pnl = (
             (trade["entry"] - current_price)
             / trade["entry"]
         ) * 100 * trade["leverage"]
-
     return round(pnl, 2)
 
 # ================= MONITOR =================
 
 def monitor_trades():
-
     for coin, trade in list(active_trades.items()):
-
         try:
-
             price = get_price(coin + "USDT")
-
             if price is None:
                 continue
-
             pnl = calculate_pnl(trade, price)
-
             if "last_update" not in trade:
                 trade["last_update"] = 0
-
             if time.time() - trade["last_update"] > 1800:
-
                 send_telegram(f'''
 📈 LIVE TRADE UPDATE {coin}
 
@@ -551,52 +430,33 @@ def monitor_trades():
 
 🕒 {get_ist_time()}
 ''')
-
                 trade["last_update"] = time.time()
-
         except Exception as e:
-
             print("Monitor Error:", e)
 
 # ================= MAIN =================
 
-send_telegram("🚀 BOT STARTED")
-send_telegram("✅ BINANCE AI BOT ONLINE")
+send_telegram("🚀 BOT STARTED - TEST MODE")
+send_telegram("✅ BINANCE AI BOT ONLINE | BTC ONLY | 5 MIN SCAN")
 
 last_signal_time = time.time() - 3600
 
 while True:
-
     try:
-
         check_updates()
-
         signals = []
-
-        print("STARTING MARKET SCAN")
+        print(f"[{get_ist_time()}] STARTING MARKET SCAN - BTC ONLY")
 
         for coin in COINS:
-
             signal = generate_signal(coin)
-
             if not signal:
                 continue
-
             signals.append((coin, signal))
-
             last_signal_data[coin] = signal
 
-            if signal["strong"]:
-
-                now = time.time()
-
-                if (
-                    coin not in last_strong_signal_time or
-                    now - last_strong_signal_time[coin] > 7200
-                ):
-
-                    msg = f'''
-🔥 STRONG SIGNAL {coin}
+            # Send ALL signals in test mode, not just strong
+            msg = f'''
+🔥 TEST SIGNAL {coin}
 
 📢 Direction: {signal['direction']}
 📊 Leverage: {signal['leverage']}x
@@ -627,19 +487,23 @@ while True:
 
 🕒 Trade Time: {get_ist_time()}
 '''
+            send_telegram(msg, coin)
 
-                    send_telegram(msg, coin)
-
+            # Still respect strong signal cooldown
+            if signal["strong"]:
+                now = time.time()
+                if (
+                    coin not in last_strong_signal_time or
+                    now - last_strong_signal_time[coin] > 7200
+                ):
                     last_strong_signal_time[coin] = now
 
         monitor_trades()
 
-        print("Waiting 60 Seconds...\n")
-
-        time.sleep(60)
+        print(f"[{get_ist_time()}] Waiting 5 Minutes...\n")
+        time.sleep(300) # CHANGED: 5 MINUTES = 300 SECONDS
 
     except Exception as e:
-
         print("MAIN LOOP ERROR:", e)
-
-        time.sleep(5)
+        send_telegram(f"❌ MAIN ERROR: {str(e)}")
+        time.sleep(60)
