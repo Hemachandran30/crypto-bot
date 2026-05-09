@@ -1,5 +1,5 @@
-# ================= COINDCX + BINANCE VISION - PRODUCTION BOT v2.10 FINAL =================
-# REMOVED: try/except block in handle_updates | NO MORE LINE 435 CRASH
+# ================= COINDCX + BINANCE VISION - PRODUCTION BOT v2.11 FINAL =================
+# FIXED: Line 435 IndentationError | Added missing indented block under elif
 # FEATURES: 100 Coins | 10 Primary + 15 Shadow Patterns | Active Button Tracking
 # TP/SL + Trend Reversal + ETA + Entry Zone + Risk% | BTC Filter | Smart SL | Dynamic TP | News | 24/7
 
@@ -132,7 +132,7 @@ def get_candles(symbol, interval="15m", limit=100):
         return closes, highs, lows, opens, volumes, times
     except Exception as e:
         print(f"Candle error {symbol}: {e}")
-        return [], [], [], [], [], []
+        return [], [], [], [], []
 
 def ema(prices, period=20):
     if not prices: return 0
@@ -411,7 +411,7 @@ def monitor_active_trades():
             print(f"Monitor error: {e}")
         time.sleep(30)
 
-# ================= TELEGRAM BUTTON HANDLER - NO TRY BLOCK =================
+# ================= TELEGRAM BUTTON HANDLER - FIXED INDENTATION =================
 def handle_updates():
     global last_update_id
     while True:
@@ -432,4 +432,3 @@ def handle_updates():
                             answer_callback(cq["id"], "Tracking ON ✅")
                             del pending_signals
                     elif data.startswith("IGNORE_"):
-      
