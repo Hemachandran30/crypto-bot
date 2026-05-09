@@ -1,5 +1,5 @@
-# ================= COINDCX + BINANCE VISION - PRODUCTION BOT v2.5 FINAL =================
-# FIXED: Line 438 unterminated f-string | ALL SYNTAX CHECKED | READY FOR RAILWAY
+# ================= COINDCX + BINANCE VISION - PRODUCTION BOT v2.6 FINAL =================
+# FIXED: Line 429 unterminated f-string REMOVED | Uses send_telegram() for all calls
 # FEATURES: 100 Coins | 10 Primary + 15 Shadow Patterns | Active Button Tracking
 # TP/SL + Trend Reversal + ETA + Entry Zone + Risk% | BTC Filter | Smart SL | Dynamic TP | News | 24/7
 
@@ -83,6 +83,14 @@ def send_telegram(msg, coin=None, add_buttons=False):
             print(f"Telegram Error: {res.text}")
     except Exception as e:
         print(f"Telegram Error: {e}")
+
+def answer_callback(callback_query_id, text):
+    try:
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/answerCallbackQuery"
+        payload = {"callback_query_id": callback_query_id, "text": text}
+        requests.post(url, json=payload, timeout=10)
+    except Exception as e:
+        print(f"Callback Error: {e}")
 
 def save_trade_history():
     try:
@@ -366,13 +374,13 @@ def monitor_active_trades():
                 if tp_hit:
                     send_telegram(f"🎯 <b>TP HIT {coin}</b>\nEntry: {trade['entry']:.4f}\nExit: {price:.4f}\nProfit: +{pnl:.2f}%\nPattern: {trade['pattern']}")
                     track_pattern_result(trade["pattern"], pnl)
-                    del active_trades[coin]
+                    del active_trades
                     continue
 
                 if sl_hit:
                     send_telegram(f"🛑 <b>SL HIT {coin}</b>\nEntry: {trade['entry']:.4f}\nExit: {price:.4f}\nLoss: {pnl:.2f}%\nPattern: {trade['pattern']}")
                     track_pattern_result(trade["pattern"], pnl)
-                    del active_trades[coin]
+                    del active_trades
                     continue
 
                 sl_distance = abs(trade["entry"] - trade["initial_sl"])
@@ -403,7 +411,7 @@ def monitor_active_trades():
             print(f"Monitor error: {e}")
         time.sleep(30)
 
-# ================= TELEGRAM BUTTON HANDLER - LINE 438 FIXED =================
+# ================= TELEGRAM BUTTON HANDLER - FIXED LINE 429 =================
 def handle_updates():
     global last_update_id
     while True:
@@ -419,11 +427,8 @@ def handle_updates():
                     coin = data.split("_")[1]
                     if data.startswith("ACTIVATE_"):
                         if coin in pending_signals:
-                            active_trades[coin] = pending_signals[coin]
+                            active_trades = pending_signals
                             send_telegram(f"✅ <b>Tracking Activated</b> for {coin}\nTP/SL + Reversal + ETA alerts ON.")
-                            requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/answerCallbackQuery", json={"callback_query_id": cq["id"], "text": "Tracking ON ✅"})
-                            del pending_signals[coin]
-                    elif data.startswith("IGNORE_"):
-                        if coin in pending_signals:
-                            del pending_signals[coin]
-                        requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/
+                            answer_callback(cq["id"], "Tracking ON ✅")
+                            del pending_signals
+                    elif data.startswith("IG
