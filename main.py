@@ -1,5 +1,5 @@
-# ================= COINDCX + BINANCE VISION - PRODUCTION BOT v2.18.0 PREDICTIVE =================
-# LOGIC: Scan 24/7 every 5min | Send BEST signals 1x per hour | Predict 30min ahead
+# ================= COINDCX + BINANCE VISION - PRODUCTION BOT v2.18.1 PREDICTIVE =================
+# LOGIC: Scan 24/7 every 5min | Send BEST signals 1x per hour | Predict 30-60min ahead
 # DYNAMIC LEVERAGE: BTC/ETH=10x | Large=8x | Mid=5x | Volatile=3x | Target 20-25%
 
 import requests
@@ -57,17 +57,18 @@ ALL_PATTERNS = PRIMARY_PATTERNS + SHADOW_PATTERNS
 # ================= STATE =================
 active_trades = {}
 pending_signals = {}
-hourly_queue = {} # NEW: Stores setups forming for next hourly batch
+hourly_queue = {} # Stores setups forming for next hourly batch
 pattern_stats = {p: {"signals":0,"wins":0,"losses":0,"total_pnl":0} for p in ALL_PATTERNS}
 last_update_id = None
 last_report_time = time.time()
-last_hourly_batch_time = 0 # NEW: Track last hourly send
+last_hourly_time = time.time()
+last_hourly_batch_time = 0 # Track last hourly send
 IST = ZoneInfo("Asia/Kolkata")
 SCAN_INTERVAL = 300 # 5min scan 24/7 - YOUR RULE
 REQUEST_TIMEOUT = 8
 DELAY_BETWEEN_COINS = 0.15
 MAX_SIGNALS_PER_HOUR = 3 # YOUR RULE: Max 3 best signals per hour
-MIN_SETUP_SCORE = 75 # Setup must be 75% formed to queue
+MIN_SETUP_SCORE = 75 # Setup must be 75%+ formed to queue
 
 # ================= UTILS =================
 def get_ist_time():
@@ -119,7 +120,7 @@ def load_trade_history():
             pattern_stats = json.load(f)
     except:
         print("No history file, starting fresh")
-      # ================= DATA FETCH =================
+        # ================= DATA FETCH =================
 def get_price(symbol):
     try:
         res = requests.get(BINANCE_PRICE_URL, params={"symbol": symbol}, timeout=REQUEST_TIMEOUT)
@@ -219,8 +220,8 @@ def detect_shadow_patterns(closes, highs, lows, opens, volumes, price, trend_sco
     patterns = []
     if rsi_val > 80 and closes[-1] < opens[-1]: patterns.append("Double Top")
     if max(highs[-5:]) - min(lows[-5:]) < atr(highs,lows,closes) * 1.2: patterns.append("Scalping Setup")
-    return patterns  
-# ================= DYNAMIC LEVERAGE - YOUR RULE =================
+    return patterns
+    # ================= DYNAMIC LEVERAGE - YOUR RULE =================
 def get_dynamic_leverage(symbol, atr_val, entry):
     atr_pct = (atr_val / entry) * 100
     if symbol in ["BTCUSDT", "ETHUSDT", "BNBUSDT"]:
@@ -269,16 +270,13 @@ def get_smart_sl_tp(closes, highs, lows, direction, entry, atr_val, momentum, vo
 
 # ================= PREDICTIVE SIGNAL DETECTION =================
 def calculate_setup_score(conf, rsi_val, momentum, vol_strength, price, ideal_entry):
-    score = conf # Base 0-100
-    # Bonus if near ideal entry zone
+    score = conf
     entry_distance_pct = abs(price - ideal_entry) / ideal_entry * 100
-    if entry_distance_pct < 0.5: score += 15 # Within 0.5% of ideal
+    if entry_distance_pct < 0.5: score += 15
     elif entry_distance_pct < 1.0: score += 10
     elif entry_distance_pct < 2.0: score += 5
-    # Bonus for momentum
     if abs(momentum) >= 4: score += 10
     elif abs(momentum) >= 2: score += 5
-    # Bonus for volume
     if vol_strength >= 200: score += 10
     elif vol_strength >= 150: score += 5
     return min(round(score), 100)
@@ -320,11 +318,10 @@ def detect_setup(coin):
         sl, tp, leverage, profit_target, tp_mult, ideal_entry, ez_low, ez_high, risk_pct = get_smart_sl_tp(closes, highs, lows, direction, price, atr_val, momentum, vol_strength, symbol)
         setup_score = calculate_setup_score(conf, rsi_val, momentum, vol_strength, price, ideal_entry)
 
-        # YOUR RULE: Only queue if 75%+ formed
         if setup_score >= MIN_SETUP_SCORE:
             eta = calculate_eta(price, tp, atr_val, momentum, tf)
             vol_rank = get_volatility_rank(atr_val, price)
-            expires_at = get_ist_datetime() + timedelta(minutes=60) # Valid for next hour
+            expires_at = get_ist_datetime() + timedelta(minutes=60)
 
             setup = {
                 "coin": coin, "direction": direction, "entry": price, "tp": tp, "sl": sl,
@@ -393,7 +390,7 @@ def monitor_active_trades():
         except Exception as e:
             print(f"Monitor error: {e}")
         time.sleep(30)
-        # ================= TELEGRAM BUTTON HANDLER - FIXED =================
+        # ================= TELEGRAM BUTTON HANDLER =================
 def handle_updates():
     global last_update_id, active_trades, pending_signals
     while True:
@@ -478,7 +475,6 @@ def send_hourly_signal_batch():
         send_telegram(f"📡 <b>HOURLY SCAN COMPLETE</b> - {get_ist_time()}\n\nNo setups forming.\n\nNext batch in 1 hour.")
         return
 
-    # Sort by setup_score, take top 3
     sorted_setups = sorted(hourly_queue.values(), key=lambda x: x["setup_score"], reverse=True)[:MAX_SIGNALS_PER_HOUR]
 
     send_telegram(f"🎯 <b>HOURLY SIGNAL BATCH</b> - {get_ist_time()}\n\n{len(sorted_setups)} setups ready:")
@@ -524,13 +520,13 @@ def send_hourly_signal_batch():
         pattern_stats[sig['pattern']]["signals"] += 1
         time.sleep(1)
 
-    hourly_queue.clear() # Clear for next hour
+    hourly_queue.clear()
 
 # ================= MAIN LOOP - PREDICTIVE 24/7 SCAN =================
 def main():
-    global last_report_time, last_hourly_batch_time, hourly_queue
+    global last_report_time, last_hourly_time, last_hourly_batch_time, hourly_queue
     load_trade_history()
-    send_telegram("🚀 <b>BOT ONLINE v2.18.0 PREDICTIVE</b>\n\n150 Coins | 5min Scans 24/7\n\nHourly Signal Batch | Dynamic Leverage\n\nTarget 20-25% | Max 3 signals/hour")
+    send_telegram("🚀 <b>BOT ONLINE v2.18.1 PREDICTIVE</b>\n\n150 Coins | 5min Scans 24/7\n\nHourly Signal Batch | Dynamic Leverage\n\nTarget 20-25% | Max 3 signals/hour")
 
     threading.Thread(target=monitor_active_trades, daemon=True).start()
     threading.Thread(target=handle_updates, daemon=True).start()
@@ -543,13 +539,12 @@ def main():
             for coin in COINS:
                 setup = detect_setup(coin)
                 if setup:
-                    # Keep only best setup per coin
-                    if coin not in hourly_queue or setup["setup_score"] > hourly_queue[coin]["setup_score"]:
+                    if coin not in hourly_queue or setup["setup_score"] > hourly_queue["setup_score"]:
                         hourly_queue = setup
                 time.sleep(DELAY_BETWEEN_COINS)
 
             # CHECK IF TOP OF HOUR - SEND BATCH
-            if is_top_of_hour() and time.time() - last_hourly_batch_time > 3500: # Prevent double send
+            if is_top_of_hour() and time.time() - last_hourly_batch_time > 3500:
                 send_hourly_signal_batch()
                 last_hourly_batch_time = time.time()
 
