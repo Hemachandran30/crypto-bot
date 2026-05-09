@@ -1,5 +1,5 @@
-# ================= COINDCX + BINANCE VISION - PRODUCTION BOT v2.13 FINAL =================
-# STATUS: IndentationError KILLED | TESTED: py_compile | 24/7 RAILWAY READY
+# ================= COINDCX + BINANCE VISION - PRODUCTION BOT v2.14 FINAL =================
+# FIXED: UnboundLocalError active_trades | Added global declaration
 # FEATURES: 100 Coins | 10 Primary + 15 Shadow Patterns | Active Button Tracking
 # TP/SL + Trend Reversal + ETA + Entry Zone + Risk% | BTC Filter | Smart SL | Dynamic TP | News | 24/7
 
@@ -13,8 +13,8 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 # ================= CONFIG =================
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "YOUR_TELEGRAM_TOKEN_HERE")
-CHAT_ID = os.getenv("CHAT_ID", "YOUR_CHAT_ID_HERE")
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "8265055522:AAGl2v211gtKwqYTmjue_gXW9Vx0dvf8Wes")
+CHAT_ID = os.getenv("CHAT_ID", "931982378")
 NEWS_API_KEY = os.getenv("NEWS_API_KEY", "")
 
 BINANCE_PRICE_URL = "https://data-api.binance.vision/api/v3/ticker/price"
@@ -122,7 +122,7 @@ def get_candles(symbol, interval="15m", limit=100):
     try:
         res = requests.get(BINANCE_KLINE_URL, params={"symbol":symbol,"interval":interval,"limit":limit}, timeout=REQUEST_TIMEOUT)
         data = res.json()
-        if not isinstance(data, list): return [], [], [], [], []
+        if not isinstance(data, list): return [], [], [], [], [], []
         closes = [float(x[4]) for x in data]
         highs = [float(x[2]) for x in data]
         lows = [float(x[3]) for x in data]
@@ -188,8 +188,7 @@ def market_session_allows_trade():
     if 0 <= hour < 6: return False
     if hour == 19 and datetime.now(IST).minute < 30: return False
     return True
-
-# ================= PATTERN DETECTION =================
+    # ================= PATTERN DETECTION =================
 def detect_primary_patterns(closes, highs, lows, opens, volumes, price, trend_score, rsi_val, momentum, vol_strength, atr_val):
     patterns = []
     if abs(trend_score) >= 3: patterns.append("EMA Trend")
@@ -353,8 +352,7 @@ def send_pattern_report():
             if wr >= 65 and s["signals"] >= 10:
                 msg += f" ⚡ PROMOTE {p}!\n"
     send_telegram(msg)
-
-# ================= ACTIVE TRADE MONITORING =================
+    # ================= ACTIVE TRADE MONITORING =================
 def monitor_active_trades():
     while True:
         try:
@@ -411,9 +409,9 @@ def monitor_active_trades():
             print(f"Monitor error: {e}")
         time.sleep(30)
 
-# ================= TELEGRAM BUTTON HANDLER - FIXED INDENTATION =================
+# ================= TELEGRAM BUTTON HANDLER - FIXED GLOBAL =================
 def handle_updates():
-    global last_update_id
+    global last_update_id, active_trades, pending_signals
     while True:
         try:
             url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates"
@@ -455,7 +453,7 @@ def fetch_news_for_active_coins():
 # ================= MAIN LOOP =================
 def main():
     load_trade_history()
-    send_telegram("🚀 <b>BOT ONLINE v2.13 FINAL</b>\n100 Coins | 10+15 Patterns | Active Tracking\nETA + Entry Zone + Risk% | BTC Filter | Smart SL | 24/7")
+    send_telegram("🚀 <b>BOT ONLINE v2.14 FINAL</b>\n100 Coins | 10+15 Patterns | Active Tracking\nETA + Entry Zone + Risk% | BTC Filter | Smart SL | 24/7")
 
     threading.Thread(target=monitor_active_trades, daemon=True).start()
     threading.Thread(target=handle_updates, daemon=True).start()
