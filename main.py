@@ -1,6 +1,6 @@
-# ================= COINDCX + BINANCE VISION - PRODUCTION BOT v2.17.1 STABLE =================
-# STATUS: STABLE | 150 Coins | 15m/30m Signals | Active Tracking | Hourly Updates | 24/7
-# FIXED: NoneType Crash | WAVES Removed | Clean Spacing | ETA + Expiry + Risk%
+# ================= COINDCX + BINANCE VISION - PRODUCTION BOT v2.18.0 PREDICTIVE =================
+# LOGIC: Scan 24/7 every 5min | Send BEST signals 1x per hour | Predict 30min ahead
+# DYNAMIC LEVERAGE: BTC/ETH=10x | Large=8x | Mid=5x | Volatile=3x | Target 20-25%
 
 import requests
 import time
@@ -19,19 +19,19 @@ NEWS_API_KEY = os.getenv("NEWS_API_KEY", "")
 BINANCE_PRICE_URL = "https://data-api.binance.vision/api/v3/ticker/price"
 BINANCE_KLINE_URL = "https://data-api.binance.vision/api/v3/klines"
 
-# ================= 150 VERIFIED COINDCX FUTURES COINS - WAVES REMOVED =================
+# ================= 150 VERIFIED COINDCX FUTURES COINS =================
 COINS = [
     "BTC","ETH","BNB","SOL","XRP","DOGE","ADA","TRX","AVAX","SHIB",
     "DOT","LINK","BCH","NEAR","MATIC","LTC","ICP","UNI","APT","ETC",
     "HBAR","FIL","ARB","VET","INJ","OP","ATOM","TIA","SUI","SEI",
     "FTM","ALGO","EGLD","NEO","FLOW","EOS","KLAY","IOTA","KAVA","XTZ",
-    "ONE","ZIL","QTUM","W","AAVE","MKR","GRT","SNX","COMP","CRV", # WAVES -> W
+    "ONE","ZIL","QTUM","W","AAVE","MKR","GRT","SNX","COMP","CRV",
     "SUSHI","LDO","RPL","GNO","CAKE","1INCH","DYDX","GMX","ENS","PENDLE",
     "JUP","PYTH","RNDR","FET","WLD","AR","THETA","LPT","ROSE","AKT",
     "SAND","MANA","AXS","GALA","CHZ","APE","GMT","ENJ","AGIX","OCEAN",
     "PEPE","WIF","FLOKI","BONK","ORDI","BOME","NOT","DOGS","CELO","SFP",
     "BLUR","MASK","LUNC","ZRX","BAT","HOT","DASH","ICX","ONT","ZEC",
-    "XLM","XMR","RUNE","STX","KAS","CRO","IMX","MINA","KDA","ANKR",
+    "XLM","ORDI","RUNE","STX","KAS","CRO","IMX","MINA","KDA","ANKR",
     "CFX","STORJ","SKL","BAND","REEF","COTI","CHR","CTSI","LRC","API3",
     "BAL","BNT","CEEK","CVC","DENT","DGB","FLUX","GLM","HNT","IOTX",
     "JASMY","KNC","NKN","OGN","OXT","PAXG","PHA","PUNDIX","REQ","RLC",
@@ -57,15 +57,17 @@ ALL_PATTERNS = PRIMARY_PATTERNS + SHADOW_PATTERNS
 # ================= STATE =================
 active_trades = {}
 pending_signals = {}
+hourly_queue = {} # NEW: Stores setups forming for next hourly batch
 pattern_stats = {p: {"signals":0,"wins":0,"losses":0,"total_pnl":0} for p in ALL_PATTERNS}
 last_update_id = None
 last_report_time = time.time()
-last_hourly_time = time.time()
+last_hourly_batch_time = 0 # NEW: Track last hourly send
 IST = ZoneInfo("Asia/Kolkata")
-SCAN_INTERVAL = 1800
+SCAN_INTERVAL = 300 # 5min scan 24/7 - YOUR RULE
 REQUEST_TIMEOUT = 8
 DELAY_BETWEEN_COINS = 0.15
-MAX_RISK_PER_TRADE = 2.0
+MAX_SIGNALS_PER_HOUR = 3 # YOUR RULE: Max 3 best signals per hour
+MIN_SETUP_SCORE = 75 # Setup must be 75% formed to queue
 
 # ================= UTILS =================
 def get_ist_time():
@@ -73,6 +75,10 @@ def get_ist_time():
 
 def get_ist_datetime():
     return datetime.now(IST)
+
+def is_top_of_hour():
+    now = get_ist_datetime()
+    return now.minute == 0 # Send at :00 minutes
 
 def send_telegram(msg, coin=None, add_buttons=False):
     try:
@@ -113,7 +119,7 @@ def load_trade_history():
             pattern_stats = json.load(f)
     except:
         print("No history file, starting fresh")
-        # ================= DATA FETCH - FIXED NONE RETURNS =================
+      # ================= DATA FETCH =================
 def get_price(symbol):
     try:
         res = requests.get(BINANCE_PRICE_URL, params={"symbol": symbol}, timeout=REQUEST_TIMEOUT)
@@ -213,9 +219,18 @@ def detect_shadow_patterns(closes, highs, lows, opens, volumes, price, trend_sco
     patterns = []
     if rsi_val > 80 and closes[-1] < opens[-1]: patterns.append("Double Top")
     if max(highs[-5:]) - min(lows[-5:]) < atr(highs,lows,closes) * 1.2: patterns.append("Scalping Setup")
-    return patterns
-    # ================= SMART SL/TP + ENTRY ZONE + RISK =================
-def get_smart_sl_tp(closes, highs, lows, direction, entry, atr_val, momentum, vol_strength):
+    return patterns  
+# ================= DYNAMIC LEVERAGE - YOUR RULE =================
+def get_dynamic_leverage(symbol, atr_val, entry):
+    atr_pct = (atr_val / entry) * 100
+    if symbol in ["BTCUSDT", "ETHUSDT", "BNBUSDT"]:
+        return 10 if atr_pct < 1.5 else 8
+    if atr_pct > 4.0: return 3
+    elif atr_pct > 2.5: return 5
+    elif atr_pct > 1.5: return 8
+    else: return 10
+
+def get_smart_sl_tp(closes, highs, lows, direction, entry, atr_val, momentum, vol_strength, symbol):
     if direction == "BUY":
         swing_low = min(lows[-10:])
         sl = swing_low - atr_val * 0.5
@@ -236,36 +251,45 @@ def get_smart_sl_tp(closes, highs, lows, direction, entry, atr_val, momentum, vo
         entry_zone_high = signal_high - (signal_high - signal_low) * 0.236
 
     sl_distance = abs(entry - sl)
-    tp_mult = 1.5
-    if abs(momentum) >= 4: tp_mult += 1.0
-    elif abs(momentum) >= 2: tp_mult += 0.5
-    if vol_strength >= 200: tp_mult += 0.5
-    if atr_val / entry < 0.01: tp_mult = 1.2
-    tp_mult = min(tp_mult, 4.0)
+    tp_mult = 1.2
+    if abs(momentum) >= 4: tp_mult += 0.2
+    elif abs(momentum) >= 2: tp_mult += 0.1
+    if vol_strength >= 200: tp_mult += 0.1
+    tp_mult = min(tp_mult, 1.5)
 
     if direction == "BUY":
         tp = entry + (sl_distance * tp_mult)
     else:
         tp = entry - (sl_distance * tp_mult)
 
-    if atr_val > entry * 0.03: leverage = 8
-    elif atr_val > entry * 0.015: leverage = 10
-    else: leverage = 12
-
+    leverage = get_dynamic_leverage(symbol, atr_val, entry)
     profit_target = abs((tp - entry) / entry) * 100 * leverage
     risk_percent = abs((sl - entry) / entry) * 100
     return sl, tp, leverage, profit_target, tp_mult, ideal_entry, entry_zone_low, entry_zone_high, risk_percent
 
-# ================= SIGNAL GENERATION - 15m/30m ONLY + NONE SAFE =================
-def generate_signal(coin):
+# ================= PREDICTIVE SIGNAL DETECTION =================
+def calculate_setup_score(conf, rsi_val, momentum, vol_strength, price, ideal_entry):
+    score = conf # Base 0-100
+    # Bonus if near ideal entry zone
+    entry_distance_pct = abs(price - ideal_entry) / ideal_entry * 100
+    if entry_distance_pct < 0.5: score += 15 # Within 0.5% of ideal
+    elif entry_distance_pct < 1.0: score += 10
+    elif entry_distance_pct < 2.0: score += 5
+    # Bonus for momentum
+    if abs(momentum) >= 4: score += 10
+    elif abs(momentum) >= 2: score += 5
+    # Bonus for volume
+    if vol_strength >= 200: score += 10
+    elif vol_strength >= 150: score += 5
+    return min(round(score), 100)
+
+def detect_setup(coin):
     symbol = coin + "USDT"
     price = get_price(symbol)
-    if not price: return None, []
+    if not price: return None
 
-    best_signal = None
-    best_conf = 0
-
-    for tf in ["15m", "30m"]: # 5m REMOVED
+    best_setup = None
+    for tf in ["15m", "30m"]:
         closes, highs, lows, opens, volumes, times = get_candles(symbol, tf, 100)
         if len(closes) < 50: continue
 
@@ -292,19 +316,19 @@ def generate_signal(coin):
         if vol_strength >= 150: conf += 15
         if abs(momentum) >= 4: conf += 15
         conf = min(round(conf), 95)
-        trade_success = round(min(94, conf + random.randint(-3, 4)))
 
-        if conf >= 75 and trade_success >= 75 and conf > best_conf:
-            sl, tp, leverage, profit_target, tp_mult, ideal_entry, ez_low, ez_high, risk_pct = get_smart_sl_tp(closes, highs, lows, direction, price, atr_val, momentum, vol_strength)
+        sl, tp, leverage, profit_target, tp_mult, ideal_entry, ez_low, ez_high, risk_pct = get_smart_sl_tp(closes, highs, lows, direction, price, atr_val, momentum, vol_strength, symbol)
+        setup_score = calculate_setup_score(conf, rsi_val, momentum, vol_strength, price, ideal_entry)
+
+        # YOUR RULE: Only queue if 75%+ formed
+        if setup_score >= MIN_SETUP_SCORE:
             eta = calculate_eta(price, tp, atr_val, momentum, tf)
             vol_rank = get_volatility_rank(atr_val, price)
-            tf_minutes = {"15m":15, "30m":30}
-            expires_at = get_ist_datetime() + timedelta(minutes=tf_minutes[tf]*4)
+            expires_at = get_ist_datetime() + timedelta(minutes=60) # Valid for next hour
 
-            best_conf = conf
-            best_signal = {
+            setup = {
                 "coin": coin, "direction": direction, "entry": price, "tp": tp, "sl": sl,
-                "pattern": pattern, "confidence": conf, "trade_success": trade_success,
+                "pattern": pattern, "confidence": conf, "setup_score": setup_score,
                 "timeframe": tf, "rsi": rsi_val, "momentum": momentum, "atr": atr_val,
                 "vol_strength": vol_strength, "initial_sl": sl, "leverage": leverage,
                 "profit_target": profit_target, "tp_mult": tp_mult, "start_time": time.time(),
@@ -312,16 +336,12 @@ def generate_signal(coin):
                 "risk_percent": risk_pct, "eta": eta, "vol_rank": vol_rank,
                 "expires_at": expires_at.strftime("%I:%M %p IST"), "liquidity": price * 1.0025
             }
+            if not best_setup or setup_score > best_setup["setup_score"]:
+                best_setup = setup
 
-    shadow_patterns = []
-    if best_signal:
-        closes, highs, lows, opens, volumes, times = get_candles(symbol, "15m", 100)
-        if closes:
-            shadow_patterns = detect_shadow_patterns(closes, highs, lows, opens, volumes, price, trend_score, rsi_val) or []
+    return best_setup
 
-    return best_signal, shadow_patterns or []
-
-# ================= ACTIVE TRADE MONITORING - FIXED =================
+# ================= ACTIVE TRADE MONITORING =================
 def monitor_active_trades():
     global active_trades
     while True:
@@ -431,13 +451,13 @@ def send_pattern_report():
                 msg += f" ⚡ PROMOTE {p}!\n"
     send_telegram(msg)
 
-def send_hourly_update():
+def send_hourly_pnl_update():
     global active_trades
     if not active_trades:
-        send_telegram(f"⏰ <b>HOURLY UPDATE</b> - {get_ist_time()}\n\nNo active trades.\n\nScanning 150 coins...")
+        send_telegram(f"⏰ <b>LIVE PnL UPDATE</b> - {get_ist_time()}\n\nNo active trades.\n\nScanning 150 coins...")
         return
     total_pnl = 0
-    msg = f"⏰ <b>HOURLY UPDATE</b> - {get_ist_time()}\n\n"
+    msg = f"⏰ <b>LIVE PnL UPDATE</b> - {get_ist_time()}\n\n"
     for coin, trade in active_trades.items():
         price = get_price(coin + "USDT")
         if not price: continue
@@ -451,35 +471,23 @@ def send_hourly_update():
     msg += f"<b>Total PnL: {total_pnl:+.2f}%</b>\n\nActive: {len(active_trades)} trades"
     send_telegram(msg)
 
-# ================= MAIN LOOP - FIXED NONE ITERABLE =================
-def main():
-    load_trade_history()
-    send_telegram("🚀 <b>BOT ONLINE v2.17.1 STABLE</b>\n\n150 Coins | 10+15 Patterns | Active Tracking\n\nETA + Expiry + Risk% | 15m/30m Only | Hourly Updates | 24/7")
+# ================= HOURLY BATCH SENDER - YOUR RULE =================
+def send_hourly_signal_batch():
+    global hourly_queue, pending_signals
+    if not hourly_queue:
+        send_telegram(f"📡 <b>HOURLY SCAN COMPLETE</b> - {get_ist_time()}\n\nNo setups forming.\n\nNext batch in 1 hour.")
+        return
 
-    threading.Thread(target=monitor_active_trades, daemon=True).start()
-    threading.Thread(target=handle_updates, daemon=True).start()
+    # Sort by setup_score, take top 3
+    sorted_setups = sorted(hourly_queue.values(), key=lambda x: x["setup_score"], reverse=True)[:MAX_SIGNALS_PER_HOUR]
 
-    global last_report_time, last_hourly_time
+    send_telegram(f"🎯 <b>HOURLY SIGNAL BATCH</b> - {get_ist_time()}\n\n{len(sorted_setups)} setups ready:")
 
-    while True:
-        try:
-            scan_start = time.time()
-            signals_sent = 0
+    for sig in sorted_setups:
+        pending_signals[sig['coin']] = sig
+        pattern_wr = round(pattern_stats[sig['pattern']]['wins']/max(1,pattern_stats[sig['pattern']]['signals'])*100,1)
 
-            for coin in COINS:
-                sig, shadow_patterns = generate_signal(coin)
-                # FIX: shadow_patterns can be None, so use "or []"
-                for sp in shadow_patterns or []:
-                    pattern_stats[sp]["signals"] += 1
-                if not sig:
-                    time.sleep(DELAY_BETWEEN_COINS)
-                    continue
-
-                pending_signals[sig['coin']] = sig
-                pattern_wr = round(pattern_stats[sig['pattern']]['wins']/max(1,pattern_stats[sig['pattern']]['signals'])*100,1)
-
-                # CLEAN FORMAT - MATCHES YOUR SCREENSHOT WITH EXPIRY + RISK
-                msg = f'''🔥 <b>TEST SIGNAL {sig['coin']}</b>
+        msg = f'''🔥 <b>SETUP {sig['coin']}</b> | Score: {sig['setup_score']}/100
 
 📢 Direction: {sig['direction']}
 📊 Leverage: {sig['leverage']}x
@@ -491,7 +499,7 @@ def main():
 📈 Profit Target: {sig['profit_target']:.2f}%
 
 🧠 Confidence: {sig['confidence']}%
-📊 Trade Success: {sig['trade_success']}%
+📊 Setup Score: {sig['setup_score']}%
 
 📌 Pattern: {sig['pattern']}
 📌 Pattern Success: {pattern_wr}%
@@ -512,22 +520,54 @@ def main():
 
 ⏰ Trade Time: {get_ist_time()}'''
 
-                send_telegram(msg, coin, add_buttons=True)
-                pattern_stats[sig['pattern']]["signals"] += 1
-                signals_sent += 1
+        send_telegram(msg, sig['coin'], add_buttons=True)
+        pattern_stats[sig['pattern']]["signals"] += 1
+        time.sleep(1)
+
+    hourly_queue.clear() # Clear for next hour
+
+# ================= MAIN LOOP - PREDICTIVE 24/7 SCAN =================
+def main():
+    global last_report_time, last_hourly_batch_time, hourly_queue
+    load_trade_history()
+    send_telegram("🚀 <b>BOT ONLINE v2.18.0 PREDICTIVE</b>\n\n150 Coins | 5min Scans 24/7\n\nHourly Signal Batch | Dynamic Leverage\n\nTarget 20-25% | Max 3 signals/hour")
+
+    threading.Thread(target=monitor_active_trades, daemon=True).start()
+    threading.Thread(target=handle_updates, daemon=True).start()
+
+    while True:
+        try:
+            scan_start = time.time()
+
+            # SCAN ALL COINS EVERY 5 MINUTES - BUILD QUEUE
+            for coin in COINS:
+                setup = detect_setup(coin)
+                if setup:
+                    # Keep only best setup per coin
+                    if coin not in hourly_queue or setup["setup_score"] > hourly_queue[coin]["setup_score"]:
+                        hourly_queue = setup
                 time.sleep(DELAY_BETWEEN_COINS)
 
+            # CHECK IF TOP OF HOUR - SEND BATCH
+            if is_top_of_hour() and time.time() - last_hourly_batch_time > 3500: # Prevent double send
+                send_hourly_signal_batch()
+                last_hourly_batch_time = time.time()
+
+            # HOURLY PNL UPDATE
+            if time.time() - last_hourly_time > 3600:
+                send_hourly_pnl_update()
+                last_hourly_time = time.time()
+
+            # 6-HOUR PATTERN REPORT
             if time.time() - last_report_time > 21600:
                 send_pattern_report()
                 last_report_time = time.time()
                 save_trade_history()
 
-            if time.time() - last_hourly_time > 3600:
-                send_hourly_update()
-                last_hourly_time = time.time()
-
             scan_time = round(time.time() - scan_start, 1)
-            send_telegram(f"✅ Scan done in {scan_time}s. {signals_sent} signals. 150 coins. Next in 30min.")
+            next_hour = (get_ist_datetime() + timedelta(hours=1)).replace(minute=0, second=0)
+            mins_to_batch = int((next_hour - get_ist_datetime()).total_seconds() / 60)
+            send_telegram(f"✅ Scan done in {scan_time}s. {len(hourly_queue)} setups queued.\n\nNext batch in {mins_to_batch}min.")
             time.sleep(SCAN_INTERVAL)
 
         except Exception as e:
