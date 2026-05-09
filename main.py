@@ -1,5 +1,5 @@
-# ================= COINDCX + BINANCE VISION - PRODUCTION BOT v2.11 FINAL =================
-# FIXED: Line 435 IndentationError | Added missing indented block under elif
+# ================= COINDCX + BINANCE VISION - PRODUCTION BOT v2.13 FINAL =================
+# STATUS: IndentationError KILLED | TESTED: py_compile | 24/7 RAILWAY READY
 # FEATURES: 100 Coins | 10 Primary + 15 Shadow Patterns | Active Button Tracking
 # TP/SL + Trend Reversal + ETA + Entry Zone + Risk% | BTC Filter | Smart SL | Dynamic TP | News | 24/7
 
@@ -13,8 +13,8 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 # ================= CONFIG =================
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "8265055522:AAGl2v211gtKwqYTmjue_gXW9Vx0dvf8Wes")
-CHAT_ID = os.getenv("CHAT_ID", "931982378")
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "YOUR_TELEGRAM_TOKEN_HERE")
+CHAT_ID = os.getenv("CHAT_ID", "YOUR_CHAT_ID_HERE")
 NEWS_API_KEY = os.getenv("NEWS_API_KEY", "")
 
 BINANCE_PRICE_URL = "https://data-api.binance.vision/api/v3/ticker/price"
@@ -122,7 +122,7 @@ def get_candles(symbol, interval="15m", limit=100):
     try:
         res = requests.get(BINANCE_KLINE_URL, params={"symbol":symbol,"interval":interval,"limit":limit}, timeout=REQUEST_TIMEOUT)
         data = res.json()
-        if not isinstance(data, list): return [], [], [], [], [], []
+        if not isinstance(data, list): return [], [], [], [], []
         closes = [float(x[4]) for x in data]
         highs = [float(x[2]) for x in data]
         lows = [float(x[3]) for x in data]
@@ -132,7 +132,7 @@ def get_candles(symbol, interval="15m", limit=100):
         return closes, highs, lows, opens, volumes, times
     except Exception as e:
         print(f"Candle error {symbol}: {e}")
-        return [], [], [], [], []
+        return [], [], [], [], [], []
 
 def ema(prices, period=20):
     if not prices: return 0
@@ -432,3 +432,79 @@ def handle_updates():
                             answer_callback(cq["id"], "Tracking ON ✅")
                             del pending_signals
                     elif data.startswith("IGNORE_"):
+                        if coin in pending_signals:
+                            del pending_signals
+                        answer_callback(cq["id"], "Ignored")
+        except Exception as e:
+            print(f"Update error: {e}")
+        time.sleep(2)
+
+# ================= NEWS FETCH =================
+def fetch_news_for_active_coins():
+    if not NEWS_API_KEY: return
+    try:
+        for coin in list(active_trades.keys()):
+            url = f"https://cryptopanic.com/api/v1/posts/?auth_token={NEWS_API_KEY}&currencies={coin}&filter=important"
+            data = requests.get(url, timeout=10).json()
+            if data.get("results"):
+                title = data["results"][0]["title"]
+                send_telegram(f"📰 <b>NEWS {coin}</b>\n{title}")
+    except Exception as e:
+        print(f"News error: {e}")
+
+# ================= MAIN LOOP =================
+def main():
+    load_trade_history()
+    send_telegram("🚀 <b>BOT ONLINE v2.13 FINAL</b>\n100 Coins | 10+15 Patterns | Active Tracking\nETA + Entry Zone + Risk% | BTC Filter | Smart SL | 24/7")
+
+    threading.Thread(target=monitor_active_trades, daemon=True).start()
+    threading.Thread(target=handle_updates, daemon=True).start()
+
+    global last_report_time
+
+    while True:
+        try:
+            scan_start = time.time()
+            signals_sent = 0
+
+            for coin in COINS:
+                sig, shadow_patterns = generate_signal(coin)
+                for sp in shadow_patterns:
+                    pattern_stats[sp]["signals"] += 1
+                if not sig:
+                    time.sleep(DELAY_BETWEEN_COINS)
+                    continue
+
+                pending_signals[sig['coin']] = sig
+                msg = f'''🔥 <b>SIGNAL {coin}</b> | Vol: {sig['vol_rank']}
+📢 {sig['direction']} | {sig['pattern']}
+💰 Entry: {sig['entry']:.4f} | Ideal: {sig['ideal_entry']:.4f}
+📍 Zone: {sig['entry_zone_low']:.4f} - {sig['entry_zone_high']:.4f}
+🎯 TP: {sig['tp']:.4f} | 🛑 SL: {sig['sl']:.4f}
+⏱️ ETA TP: {sig['eta_tp']} | ETA SL: {sig['eta_sl']}
+📈 Target: {sig['profit_target']:.1f}% | ⚡ {sig['leverage']}x | R:R 1:{sig['tp_mult']:.1f}
+⚠️ Risk: {sig['risk_percent']:.2f}% | Expires: {sig['expires_at']}
+🧠 Conf: {sig['confidence']}% | Success: {sig['trade_success']}%
+📍 TF: {sig['timeframe']} | 📉 RSI: {sig['rsi']:.1f}
+⏳ {get_ist_time()}'''
+                send_telegram(msg, coin, add_buttons=True)
+                signals_sent += 1
+                time.sleep(DELAY_BETWEEN_COINS)
+
+            if time.time() - last_report_time > 21600:
+                send_pattern_report()
+                fetch_news_for_active_coins()
+                last_report_time = time.time()
+                save_trade_history()
+
+            scan_time = round(time.time() - scan_start, 1)
+            send_telegram(f"✅ Scan done in {scan_time}s. {signals_sent} signals. Next in 30min.")
+            time.sleep(SCAN_INTERVAL)
+
+        except Exception as e:
+            send_telegram(f"❌ <b>CRASH</b>\n{str(e)}\nRestarting 60s...")
+            print(f"Main error: {e}")
+            time.sleep(60)
+
+if __name__ == "__main__":
+    main()
