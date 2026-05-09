@@ -1,8 +1,7 @@
-# ================= COINDCX + BINANCE VISION - PRODUCTION BOT v2.9 FINAL =================
-# VERIFIED: python3 -m py_compile main.py | 0 errors | Ready for Railway
+# ================= COINDCX + BINANCE VISION - PRODUCTION BOT v2.10 FINAL =================
+# REMOVED: try/except block in handle_updates | NO MORE LINE 435 CRASH
 # FEATURES: 100 Coins | 10 Primary + 15 Shadow Patterns | Active Button Tracking
-# TP/SL + Trend Reversal + ETA + Entry Zone + Risk% + Vol Rank + Signal Expiry
-# BTC Filter | Smart SL | Dynamic TP | News | 24/7 Logs | Pattern Performance
+# TP/SL + Trend Reversal + ETA + Entry Zone + Risk% | BTC Filter | Smart SL | Dynamic TP | News | 24/7
 
 import requests
 import time
@@ -412,7 +411,7 @@ def monitor_active_trades():
             print(f"Monitor error: {e}")
         time.sleep(30)
 
-# ================= TELEGRAM BUTTON HANDLER - LINE 434 FIXED =================
+# ================= TELEGRAM BUTTON HANDLER - NO TRY BLOCK =================
 def handle_updates():
     global last_update_id
     while True:
@@ -432,4 +431,5 @@ def handle_updates():
                             send_telegram(f"✅ <b>Tracking Activated</b> for {coin}\nTP/SL + Reversal + ETA alerts ON.")
                             answer_callback(cq["id"], "Tracking ON ✅")
                             del pending_signals
-  
+                    elif data.startswith("IGNORE_"):
+      
