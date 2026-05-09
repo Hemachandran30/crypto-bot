@@ -1,13 +1,12 @@
-# ================= COINDCX + BINANCE VISION - PRODUCTION BOT v2.14 FINAL =================
-# FIXED: UnboundLocalError active_trades | Added global declaration
-# FEATURES: 100 Coins | 10 Primary + 15 Shadow Patterns | Active Button Tracking
-# TP/SL + Trend Reversal + ETA + Entry Zone + Risk% | BTC Filter | Smart SL | Dynamic TP | News | 24/7
+# ================= COINDCX + BINANCE VISION - PRODUCTION BOT v2.15 LITE =================
+# STABLE: No active tracking, no buttons, no threads. Scan + Signal only.
+# FEATURES: 100 Coins | 10 Primary + 15 Shadow Patterns | ETA + Entry Zone + Risk%
+# BTC Filter | Smart SL | Dynamic TP | Pattern Stats | 24/7
 
 import requests
 import time
 import json
 import os
-import threading
 import random
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -49,10 +48,7 @@ SHADOW_PATTERNS = [
 ALL_PATTERNS = PRIMARY_PATTERNS + SHADOW_PATTERNS
 
 # ================= STATE =================
-active_trades = {}
-pending_signals = {}
 pattern_stats = {p: {"signals":0,"wins":0,"losses":0,"total_pnl":0} for p in ALL_PATTERNS}
-last_update_id = None
 last_report_time = time.time()
 IST = ZoneInfo("Asia/Kolkata")
 SCAN_INTERVAL = 1800
@@ -67,30 +63,15 @@ def get_ist_time():
 def get_ist_datetime():
     return datetime.now(IST)
 
-def send_telegram(msg, coin=None, add_buttons=False):
+def send_telegram(msg):
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
         payload = {"chat_id": CHAT_ID, "text": msg[:4000], "parse_mode": "HTML"}
-        if add_buttons and coin:
-            payload["reply_markup"] = {
-                "inline_keyboard": [[
-                    {"text": "✅ Activate Tracking", "callback_data": f"ACTIVATE_{coin}"},
-                    {"text": "❌ Ignore", "callback_data": f"IGNORE_{coin}"}
-                ]]
-            }
         res = requests.post(url, json=payload, timeout=15)
         if res.status_code!= 200:
             print(f"Telegram Error: {res.text}")
     except Exception as e:
         print(f"Telegram Error: {e}")
-
-def answer_callback(callback_query_id, text):
-    try:
-        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/answerCallbackQuery"
-        payload = {"callback_query_id": callback_query_id, "text": text}
-        requests.post(url, json=payload, timeout=10)
-    except Exception as e:
-        print(f"Callback Error: {e}")
 
 def save_trade_history():
     try:
@@ -308,11 +289,10 @@ def generate_signal(coin):
                 "coin": coin, "direction": direction, "entry": price, "tp": tp, "sl": sl,
                 "pattern": pattern, "confidence": conf, "trade_success": trade_success,
                 "timeframe": tf, "rsi": rsi_val, "momentum": momentum, "atr": atr_val,
-                "vol_strength": vol_strength, "initial_sl": sl, "leverage": leverage,
-                "profit_target": profit_target, "tp_mult": tp_mult, "start_time": time.time(),
-                "ideal_entry": ideal_entry, "entry_zone_low": ez_low, "entry_zone_high": ez_high,
-                "risk_percent": risk_pct, "eta_tp": eta_tp, "eta_sl": eta_sl,
-                "vol_rank": vol_rank, "expires_at": expires_at.strftime("%I:%M %p IST")
+                "vol_strength": vol_strength, "leverage": leverage, "profit_target": profit_target,
+                "tp_mult": tp_mult, "ideal_entry": ideal_entry, "entry_zone_low": ez_low,
+                "entry_zone_high": ez_high, "risk_percent": risk_pct, "eta_tp": eta_tp,
+                "eta_sl": eta_sl, "vol_rank": vol_rank, "expires_at": expires_at.strftime("%I:%M %p IST")
             }
 
     shadow_patterns = []
@@ -323,17 +303,7 @@ def generate_signal(coin):
 
     return best_signal, shadow_patterns
 
-# ================= PATTERN TRACKING =================
-def track_pattern_result(pattern, pnl_percent):
-    if pattern not in pattern_stats: return
-    pattern_stats[pattern]["signals"] += 1
-    pattern_stats[pattern]["total_pnl"] += pnl_percent
-    if pnl_percent > 0:
-        pattern_stats[pattern]["wins"] += 1
-    else:
-        pattern_stats[pattern]["losses"] += 1
-    save_trade_history()
-
+# ================= PATTERN REPORT =================
 def send_pattern_report():
     msg = f"📊 <b>PATTERN REPORT</b> - {get_ist_time()}\n\n<b>🔥 PRIMARY:</b>\n"
     for p in PRIMARY_PATTERNS:
@@ -352,111 +322,11 @@ def send_pattern_report():
             if wr >= 65 and s["signals"] >= 10:
                 msg += f" ⚡ PROMOTE {p}!\n"
     send_telegram(msg)
-    # ================= ACTIVE TRADE MONITORING =================
-def monitor_active_trades():
-    while True:
-        try:
-            for coin, trade in list(active_trades.items()):
-                price = get_price(coin + "USDT")
-                if not price: continue
-
-                if trade["direction"] == "BUY":
-                    pnl = (price - trade["entry"]) / trade["entry"] * 100 * trade["leverage"]
-                    tp_hit = price >= trade["tp"]
-                    sl_hit = price <= trade["sl"]
-                else:
-                    pnl = (trade["entry"] - price) / trade["entry"] * 100 * trade["leverage"]
-                    tp_hit = price <= trade["tp"]
-                    sl_hit = price >= trade["sl"]
-
-                if tp_hit:
-                    send_telegram(f"🎯 <b>TP HIT {coin}</b>\nEntry: {trade['entry']:.4f}\nExit: {price:.4f}\nProfit: +{pnl:.2f}%\nPattern: {trade['pattern']}")
-                    track_pattern_result(trade["pattern"], pnl)
-                    del active_trades
-                    continue
-
-                if sl_hit:
-                    send_telegram(f"🛑 <b>SL HIT {coin}</b>\nEntry: {trade['entry']:.4f}\nExit: {price:.4f}\nLoss: {pnl:.2f}%\nPattern: {trade['pattern']}")
-                    track_pattern_result(trade["pattern"], pnl)
-                    del active_trades
-                    continue
-
-                sl_distance = abs(trade["entry"] - trade["initial_sl"])
-                profit_distance = abs(price - trade["entry"])
-                if profit_distance >= sl_distance and not trade.get("trailed"):
-                    if trade["direction"] == "BUY":
-                        trade["sl"] = trade["entry"] * 1.003
-                    else:
-                        trade["sl"] = trade["entry"] * 0.997
-                    trade["trailed"] = True
-                    send_telegram(f"🔒 <b>TRAIL ACTIVATED {coin}</b>\nSL to breakeven. Risk-free!")
-
-                closes = get_candles(coin + "USDT", "15m", 50)[0]
-                if closes and len(closes) > 20:
-                    current_ema = ema(closes, 20)
-                    new_trend = "BUY" if closes[-1] > current_ema else "SELL"
-                    if new_trend!= trade["direction"] and trade.get("last_trend_alert", 0) < time.time() - 1800:
-                        eta_sl_current = calculate_eta(price, trade["sl"], trade["atr"], trade["momentum"], trade["timeframe"])
-                        send_telegram(f"⚠️ <b>TREND REVERSAL {coin}</b>\nYour {trade['direction']} against trend.\nNow: {price:.4f} | PnL: {pnl:.2f}%\nETA to SL: {eta_sl_current}")
-                        trade["last_trend_alert"] = time.time()
-
-                if trade.get("last_update", 0) < time.time() - 1800:
-                    eta_tp_current = calculate_eta(price, trade["tp"], trade["atr"], trade["momentum"], trade["timeframe"])
-                    send_telegram(f"📈 <b>LIVE {coin}</b>\n{trade['direction']} | {trade['pattern']}\nEntry: {trade['entry']:.4f}\nNow: {price:.4f}\nPnL: {pnl:.2f}%\nTP: {trade['tp']:.4f} | SL: {trade['sl']:.4f}\nETA TP: {eta_tp_current}")
-                    trade["last_update"] = time.time()
-
-        except Exception as e:
-            print(f"Monitor error: {e}")
-        time.sleep(30)
-
-# ================= TELEGRAM BUTTON HANDLER - FIXED GLOBAL =================
-def handle_updates():
-    global last_update_id, active_trades, pending_signals
-    while True:
-        try:
-            url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates"
-            params = {"offset": last_update_id + 1} if last_update_id else {}
-            data = requests.get(url, params=params, timeout=10).json()
-            for update in data.get("result", []):
-                last_update_id = update["update_id"]
-                if "callback_query" in update:
-                    cq = update["callback_query"]
-                    data = cq["data"]
-                    coin = data.split("_")[1]
-                    if data.startswith("ACTIVATE_"):
-                        if coin in pending_signals:
-                            active_trades = pending_signals
-                            send_telegram(f"✅ <b>Tracking Activated</b> for {coin}\nTP/SL + Reversal + ETA alerts ON.")
-                            answer_callback(cq["id"], "Tracking ON ✅")
-                            del pending_signals
-                    elif data.startswith("IGNORE_"):
-                        if coin in pending_signals:
-                            del pending_signals
-                        answer_callback(cq["id"], "Ignored")
-        except Exception as e:
-            print(f"Update error: {e}")
-        time.sleep(2)
-
-# ================= NEWS FETCH =================
-def fetch_news_for_active_coins():
-    if not NEWS_API_KEY: return
-    try:
-        for coin in list(active_trades.keys()):
-            url = f"https://cryptopanic.com/api/v1/posts/?auth_token={NEWS_API_KEY}&currencies={coin}&filter=important"
-            data = requests.get(url, timeout=10).json()
-            if data.get("results"):
-                title = data["results"][0]["title"]
-                send_telegram(f"📰 <b>NEWS {coin}</b>\n{title}")
-    except Exception as e:
-        print(f"News error: {e}")
 
 # ================= MAIN LOOP =================
 def main():
     load_trade_history()
-    send_telegram("🚀 <b>BOT ONLINE v2.14 FINAL</b>\n100 Coins | 10+15 Patterns | Active Tracking\nETA + Entry Zone + Risk% | BTC Filter | Smart SL | 24/7")
-
-    threading.Thread(target=monitor_active_trades, daemon=True).start()
-    threading.Thread(target=handle_updates, daemon=True).start()
+    send_telegram("🚀 <b>BOT ONLINE v2.15 LITE</b>\n100 Coins | 10+15 Patterns | No Tracking\nETA + Entry Zone + Risk% | BTC Filter | Smart SL | 24/7")
 
     global last_report_time
 
@@ -473,7 +343,6 @@ def main():
                     time.sleep(DELAY_BETWEEN_COINS)
                     continue
 
-                pending_signals[sig['coin']] = sig
                 msg = f'''🔥 <b>SIGNAL {coin}</b> | Vol: {sig['vol_rank']}
 📢 {sig['direction']} | {sig['pattern']}
 💰 Entry: {sig['entry']:.4f} | Ideal: {sig['ideal_entry']:.4f}
@@ -485,13 +354,13 @@ def main():
 🧠 Conf: {sig['confidence']}% | Success: {sig['trade_success']}%
 📍 TF: {sig['timeframe']} | 📉 RSI: {sig['rsi']:.1f}
 ⏳ {get_ist_time()}'''
-                send_telegram(msg, coin, add_buttons=True)
+                send_telegram(msg)
+                pattern_stats[sig['pattern']]["signals"] += 1
                 signals_sent += 1
                 time.sleep(DELAY_BETWEEN_COINS)
 
             if time.time() - last_report_time > 21600:
                 send_pattern_report()
-                fetch_news_for_active_coins()
                 last_report_time = time.time()
                 save_trade_history()
 
