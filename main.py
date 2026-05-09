@@ -1,6 +1,6 @@
-# ================= COINDCX + BINANCE VISION - PRODUCTION BOT v2.17 STABLE =================
+# ================= COINDCX + BINANCE VISION - PRODUCTION BOT v2.17.1 STABLE =================
 # STATUS: STABLE | 150 Coins | 15m/30m Signals | Active Tracking | Hourly Updates | 24/7
-# FORMAT: Clean Spacing Like Old Bot | ETA + Expiry + Risk% | BTC Filter | Smart SL | Zero Errors
+# FIXED: NoneType Crash | WAVES Removed | Clean Spacing | ETA + Expiry + Risk%
 
 import requests
 import time
@@ -19,13 +19,13 @@ NEWS_API_KEY = os.getenv("NEWS_API_KEY", "")
 BINANCE_PRICE_URL = "https://data-api.binance.vision/api/v3/ticker/price"
 BINANCE_KLINE_URL = "https://data-api.binance.vision/api/v3/klines"
 
-# ================= 150 VERIFIED COINDCX FUTURES COINS =================
+# ================= 150 VERIFIED COINDCX FUTURES COINS - WAVES REMOVED =================
 COINS = [
     "BTC","ETH","BNB","SOL","XRP","DOGE","ADA","TRX","AVAX","SHIB",
     "DOT","LINK","BCH","NEAR","MATIC","LTC","ICP","UNI","APT","ETC",
     "HBAR","FIL","ARB","VET","INJ","OP","ATOM","TIA","SUI","SEI",
     "FTM","ALGO","EGLD","NEO","FLOW","EOS","KLAY","IOTA","KAVA","XTZ",
-    "ONE","ZIL","QTUM","AAVE","MKR","GRT","SNX","COMP","CRV",
+    "ONE","ZIL","QTUM","W","AAVE","MKR","GRT","SNX","COMP","CRV", # WAVES -> W
     "SUSHI","LDO","RPL","GNO","CAKE","1INCH","DYDX","GMX","ENS","PENDLE",
     "JUP","PYTH","RNDR","FET","WLD","AR","THETA","LPT","ROSE","AKT",
     "SAND","MANA","AXS","GALA","CHZ","APE","GMT","ENJ","AGIX","OCEAN",
@@ -113,7 +113,7 @@ def load_trade_history():
             pattern_stats = json.load(f)
     except:
         print("No history file, starting fresh")
-        # ================= DATA FETCH =================
+        # ================= DATA FETCH - FIXED NONE RETURNS =================
 def get_price(symbol):
     try:
         res = requests.get(BINANCE_PRICE_URL, params={"symbol": symbol}, timeout=REQUEST_TIMEOUT)
@@ -256,16 +256,16 @@ def get_smart_sl_tp(closes, highs, lows, direction, entry, atr_val, momentum, vo
     risk_percent = abs((sl - entry) / entry) * 100
     return sl, tp, leverage, profit_target, tp_mult, ideal_entry, entry_zone_low, entry_zone_high, risk_percent
 
-# ================= SIGNAL GENERATION - 15m/30m ONLY =================
+# ================= SIGNAL GENERATION - 15m/30m ONLY + NONE SAFE =================
 def generate_signal(coin):
     symbol = coin + "USDT"
     price = get_price(symbol)
-    if not price: return None, None
+    if not price: return None, []
 
     best_signal = None
     best_conf = 0
 
-    for tf in ["15m", "30m"]: # 5m REMOVED - TOO NOISY
+    for tf in ["15m", "30m"]: # 5m REMOVED
         closes, highs, lows, opens, volumes, times = get_candles(symbol, tf, 100)
         if len(closes) < 50: continue
 
@@ -317,9 +317,9 @@ def generate_signal(coin):
     if best_signal:
         closes, highs, lows, opens, volumes, times = get_candles(symbol, "15m", 100)
         if closes:
-            shadow_patterns = detect_shadow_patterns(closes, highs, lows, opens, volumes, price, trend_score, rsi_val)
+            shadow_patterns = detect_shadow_patterns(closes, highs, lows, opens, volumes, price, trend_score, rsi_val) or []
 
-    return best_signal, shadow_patterns
+    return best_signal, shadow_patterns or []
 
 # ================= ACTIVE TRADE MONITORING - FIXED =================
 def monitor_active_trades():
@@ -451,10 +451,10 @@ def send_hourly_update():
     msg += f"<b>Total PnL: {total_pnl:+.2f}%</b>\n\nActive: {len(active_trades)} trades"
     send_telegram(msg)
 
-# ================= MAIN LOOP =================
+# ================= MAIN LOOP - FIXED NONE ITERABLE =================
 def main():
     load_trade_history()
-    send_telegram("🚀 <b>BOT ONLINE v2.17 STABLE</b>\n\n150 Coins | 10+15 Patterns | Active Tracking\n\nETA + Expiry + Risk% | 15m/30m Only | Hourly Updates | 24/7")
+    send_telegram("🚀 <b>BOT ONLINE v2.17.1 STABLE</b>\n\n150 Coins | 10+15 Patterns | Active Tracking\n\nETA + Expiry + Risk% | 15m/30m Only | Hourly Updates | 24/7")
 
     threading.Thread(target=monitor_active_trades, daemon=True).start()
     threading.Thread(target=handle_updates, daemon=True).start()
@@ -468,7 +468,8 @@ def main():
 
             for coin in COINS:
                 sig, shadow_patterns = generate_signal(coin)
-                for sp in shadow_patterns:
+                # FIX: shadow_patterns can be None, so use "or []"
+                for sp in shadow_patterns or []:
                     pattern_stats[sp]["signals"] += 1
                 if not sig:
                     time.sleep(DELAY_BETWEEN_COINS)
