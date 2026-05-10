@@ -1,5 +1,5 @@
-# ================= COINDCX + BINANCE VISION - PRODUCTION BOT v2.18.6 RELATIVE HOURLY =================
-# FIXED: string indices crash | Sends batch 60min AFTER start, not at :00 | Queue persists
+# ================= COINDCX + BINANCE VISION - PRODUCTION BOT v2.18.7 RELATIVE HOURLY =================
+# FIXED: string indices crash line 771 | Sends batch 60min AFTER start | Queue persists
 # LOGIC: Scan 24/7 every 5min | Send BEST 3 signals every 60min from bot start | Predict 30-60min ahead
 # DYNAMIC LEVERAGE: BTC/ETH=10x | Large=8x | Mid=5x | Volatile=3x | Target 20-25%
 
@@ -63,11 +63,12 @@ pattern_stats = {p: {"signals":0,"wins":0,"losses":0,"total_pnl":0} for p in ALL
 last_update_id = None
 last_report_time = time.time()
 last_hourly_time = time.time()
-last_batch_time = 0 # FIX: Tracks exact time last batch sent
+last_batch_time = 0
 IST = ZoneInfo("Asia/Kolkata")
-SCAN_INTERVAL = 300 # 5min scan 24/7
+SCAN_INTERVAL = 300
 BATCH_INTERVAL = 3600 # 60min between batches - YOUR RULE
 REQUEST_TIMEOUT = 8
+TELEGRAM_TIMEOUT = 30
 DELAY_BETWEEN_COINS = 0.15
 MAX_SIGNALS_PER_HOUR = 3
 MIN_SETUP_SCORE = 75
@@ -90,17 +91,19 @@ def send_telegram(msg, coin=None, add_buttons=False):
                     {"text": "❌ Ignore", "callback_data": f"IGNORE_{coin}"}
                 ]]
             }
-        res = requests.post(url, json=payload, timeout=15)
+        res = requests.post(url, json=payload, timeout=TELEGRAM_TIMEOUT)
         if res.status_code!= 200:
             print(f"Telegram Error: {res.text}")
+        return True
     except Exception as e:
         print(f"Telegram Error: {e}")
+        return False
 
 def answer_callback(callback_query_id, text):
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/answerCallbackQuery"
         payload = {"callback_query_id": callback_query_id, "text": text}
-        requests.post(url, json=payload, timeout=10)
+        requests.post(url, json=payload, timeout=TELEGRAM_TIMEOUT)
     except Exception as e:
         print(f"Callback Error: {e}")
 
@@ -118,7 +121,7 @@ def load_trade_history():
             pattern_stats = json.load(f)
     except:
         print("No history file, starting fresh")
-       # ================= DATA FETCH =================
+      # ================= DATA FETCH =================
 def get_price(symbol):
     try:
         res = requests.get(BINANCE_PRICE_URL, params={"symbol": symbol}, timeout=REQUEST_TIMEOUT)
@@ -133,7 +136,7 @@ def get_candles(symbol, interval="15m", limit=100):
     try:
         res = requests.get(BINANCE_KLINE_URL, params={"symbol":symbol,"interval":interval,"limit":limit}, timeout=REQUEST_TIMEOUT)
         data = res.json()
-        if not isinstance(data, list): return [], [], [], [], [], []
+        if not isinstance(data, list): return [], [], [], []
         closes = [float(x[4]) for x in data]
         highs = [float(x[2]) for x in data]
         lows = [float(x[3]) for x in data]
@@ -143,7 +146,7 @@ def get_candles(symbol, interval="15m", limit=100):
         return closes, highs, lows, opens, volumes, times
     except Exception as e:
         print(f"Candle error {symbol}: {e}")
-        return [], [], [], [], [], []
+        return [], [], [], []
 
 def ema(prices, period=20):
     if not prices: return 0
@@ -218,8 +221,8 @@ def detect_shadow_patterns(closes, highs, lows, opens, volumes, price, trend_sco
     patterns = []
     if rsi_val > 80 and closes[-1] < opens[-1]: patterns.append("Double Top")
     if max(highs[-5:]) - min(lows[-5:]) < atr(highs,lows,closes) * 1.2: patterns.append("Scalping Setup")
-    return patterns 
-# ================= DYNAMIC LEVERAGE - YOUR RULE =================
+    return patterns  
+# ================= DYNAMIC LEVERAGE =================
 def get_dynamic_leverage(symbol, atr_val, entry):
     atr_pct = (atr_val / entry) * 100
     if symbol in ["BTCUSDT", "ETHUSDT", "BNBUSDT"]:
@@ -379,14 +382,14 @@ def monitor_active_trades():
         except Exception as e:
             print(f"Monitor error: {e}")
         time.sleep(30)
-       # ================= TELEGRAM BUTTON HANDLER =================
+     # ================= TELEGRAM BUTTON HANDLER - FIXED TIMEOUT =================
 def handle_updates():
     global last_update_id, active_trades, pending_signals
     while True:
         try:
             url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates"
-            params = {"offset": last_update_id + 1} if last_update_id else {}
-            data = requests.get(url, params=params, timeout=10).json()
+            params = {"offset": last_update_id + 1, "timeout": 25} if last_update_id else {"timeout": 25}
+            data = requests.get(url, params=params, timeout=TELEGRAM_TIMEOUT).json()
             for update in data.get("result", []):
                 last_update_id = update["update_id"]
                 if "callback_query" in update:
@@ -403,9 +406,12 @@ def handle_updates():
                         if coin in pending_signals:
                             del pending_signals
                         answer_callback(cq["id"], "Ignored")
+        except requests.exceptions.Timeout:
+            print("Telegram timeout - retrying...")
+            time.sleep(5)
         except Exception as e:
             print(f"Update error: {e}")
-        time.sleep(2)
+            time.sleep(5)
 
 # ================= PATTERN TRACKING =================
 def track_pattern_result(pattern, pnl_percent):
@@ -455,7 +461,7 @@ def send_hourly_pnl_update():
     msg += f"<b>Total PnL: {total_pnl:+.2f}%</b>\n\nActive: {len(active_trades)} trades"
     send_telegram(msg)
 
-# ================= HOURLY BATCH SENDER - RELATIVE TIME FIX =================
+# ================= HOURLY BATCH SENDER - RELATIVE TIME =================
 def send_hourly_signal_batch():
     global hourly_queue, pending_signals, last_batch_time
     if not hourly_queue:
@@ -514,12 +520,16 @@ def send_hourly_signal_batch():
 def main():
     global last_report_time, last_hourly_time, last_batch_time, hourly_queue
     load_trade_history()
-    send_telegram("🚀 <b>BOT ONLINE v2.18.6 RELATIVE HOURLY</b>\n\n150 Coins | 5min Scans 24/7\n\nSends batch 60min after start\n\nDynamic Leverage | Target 20-25%")
+
+    try:
+        send_telegram("🚀 <b>BOT ONLINE v2.18.7 RELATIVE HOURLY</b>\n\n150 Coins | 5min Scans 24/7\n\nSends batch 60min after start\n\nDynamic Leverage | Target 20-25%")
+    except:
+        print("Startup message failed - continuing anyway")
 
     threading.Thread(target=monitor_active_trades, daemon=True).start()
     threading.Thread(target=handle_updates, daemon=True).start()
 
-    # FIX: Send first batch after first scan completes
+    # Send first batch after first scan completes
     first_run = True
 
     while True:
@@ -530,8 +540,8 @@ def main():
             for coin in COINS:
                 setup = detect_setup(coin)
                 if setup:
-                    if coin not in hourly_queue or setup["setup_score"] > hourly_queue["setup_score"]:
-                        hourly_queue = setup # FIX: Use not overwrite dict
+                    if coin not in hourly_queue or setup["setup_score"] > hourly_queue[coin]["setup_score"]:
+                        hourly_queue[coin] = setup # FIX: Use not overwrite dict
                 time.sleep(DELAY_BETWEEN_COINS)
 
             # SEND BATCH: First run OR every 60min from last batch
@@ -562,4 +572,4 @@ def main():
             time.sleep(60)
 
 if __name__ == "__main__":
-    main() 
+    main()   
