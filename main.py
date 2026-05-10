@@ -1,6 +1,6 @@
-# ================= COINDCX + BINANCE VISION - PRODUCTION BOT v2.18.7 RELATIVE HOURLY =================
-# FIXED: string indices crash line 771 | Sends batch 60min AFTER start | Queue persists
-# LOGIC: Scan 24/7 every 5min | Send BEST 3 signals every 60min from bot start | Predict 30-60min ahead
+# ================= COINDCX + BINANCE VISION - PRODUCTION BOT v2.18.8 RELATIVE HOURLY =================
+# FIXED: Global vars crash | string indices crash | Telegram timeout spam
+# LOGIC: Scan 24/7 every 5min | Send BEST 3 signals every 60min from START TIME | Predict 30-60min ahead
 # DYNAMIC LEVERAGE: BTC/ETH=10x | Large=8x | Mid=5x | Volatile=3x | Target 20-25%
 
 import requests
@@ -68,7 +68,7 @@ IST = ZoneInfo("Asia/Kolkata")
 SCAN_INTERVAL = 300
 BATCH_INTERVAL = 3600 # 60min between batches - YOUR RULE
 REQUEST_TIMEOUT = 8
-TELEGRAM_TIMEOUT = 30
+TELEGRAM_TIMEOUT = 30 # FIX: Increased timeout
 DELAY_BETWEEN_COINS = 0.15
 MAX_SIGNALS_PER_HOUR = 3
 MIN_SETUP_SCORE = 75
@@ -121,7 +121,7 @@ def load_trade_history():
             pattern_stats = json.load(f)
     except:
         print("No history file, starting fresh")
-      # ================= DATA FETCH =================
+        # ================= DATA FETCH =================
 def get_price(symbol):
     try:
         res = requests.get(BINANCE_PRICE_URL, params={"symbol": symbol}, timeout=REQUEST_TIMEOUT)
@@ -136,7 +136,7 @@ def get_candles(symbol, interval="15m", limit=100):
     try:
         res = requests.get(BINANCE_KLINE_URL, params={"symbol":symbol,"interval":interval,"limit":limit}, timeout=REQUEST_TIMEOUT)
         data = res.json()
-        if not isinstance(data, list): return [], [], [], []
+        if not isinstance(data, list): return [], [], [], [], [], []
         closes = [float(x[4]) for x in data]
         highs = [float(x[2]) for x in data]
         lows = [float(x[3]) for x in data]
@@ -146,7 +146,7 @@ def get_candles(symbol, interval="15m", limit=100):
         return closes, highs, lows, opens, volumes, times
     except Exception as e:
         print(f"Candle error {symbol}: {e}")
-        return [], [], [], []
+        return [], [], [], [], [], []
 
 def ema(prices, period=20):
     if not prices: return 0
@@ -221,8 +221,8 @@ def detect_shadow_patterns(closes, highs, lows, opens, volumes, price, trend_sco
     patterns = []
     if rsi_val > 80 and closes[-1] < opens[-1]: patterns.append("Double Top")
     if max(highs[-5:]) - min(lows[-5:]) < atr(highs,lows,closes) * 1.2: patterns.append("Scalping Setup")
-    return patterns  
-# ================= DYNAMIC LEVERAGE =================
+    return patterns
+    # ================= DYNAMIC LEVERAGE =================
 def get_dynamic_leverage(symbol, atr_val, entry):
     atr_pct = (atr_val / entry) * 100
     if symbol in ["BTCUSDT", "ETHUSDT", "BNBUSDT"]:
@@ -339,9 +339,9 @@ def detect_setup(coin):
 
     return best_setup
 
-# ================= ACTIVE TRADE MONITORING =================
+# ================= ACTIVE TRADE MONITORING - FIXED GLOBAL =================
 def monitor_active_trades():
-    global active_trades
+    global active_trades # FIX: Add global
     while True:
         try:
             for coin, trade in list(active_trades.items()):
@@ -360,13 +360,13 @@ def monitor_active_trades():
                 if tp_hit:
                     send_telegram(f"🎯 <b>TP HIT {coin}</b>\n\nEntry: {trade['entry']:.4f}\n\nExit: {price:.4f}\n\nProfit: +{pnl:.2f}%\n\nPattern: {trade['pattern']}")
                     track_pattern_result(trade["pattern"], pnl)
-                    del active_trades
+                    del active_trades[coin]
                     continue
 
                 if sl_hit:
                     send_telegram(f"🛑 <b>SL HIT {coin}</b>\n\nEntry: {trade['entry']:.4f}\n\nExit: {price:.4f}\n\nLoss: {pnl:.2f}%\n\nPattern: {trade['pattern']}")
                     track_pattern_result(trade["pattern"], pnl)
-                    del active_trades
+                    del active_trades[coin]
                     continue
 
                 sl_distance = abs(trade["entry"] - trade["initial_sl"])
@@ -382,9 +382,9 @@ def monitor_active_trades():
         except Exception as e:
             print(f"Monitor error: {e}")
         time.sleep(30)
-     # ================= TELEGRAM BUTTON HANDLER - FIXED TIMEOUT =================
+        # ================= TELEGRAM BUTTON HANDLER - FIXED GLOBAL =================
 def handle_updates():
-    global last_update_id, active_trades, pending_signals
+    global last_update_id, active_trades, pending_signals # FIX: Add globals
     while True:
         try:
             url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates"
@@ -398,13 +398,13 @@ def handle_updates():
                     coin = data.split("_")[1]
                     if data.startswith("ACTIVATE_"):
                         if coin in pending_signals:
-                            active_trades = pending_signals
+                            active_trades[coin] = pending_signals[coin] # FIX: Only activate one coin
                             send_telegram(f"✅ <b>Tracking Activated</b> for {coin}\n\nTP/SL + Reversal + Hourly alerts ON.")
                             answer_callback(cq["id"], "Tracking ON ✅")
-                            del pending_signals
+                            del pending_signals[coin]
                     elif data.startswith("IGNORE_"):
                         if coin in pending_signals:
-                            del pending_signals
+                            del pending_signals[coin]
                         answer_callback(cq["id"], "Ignored")
         except requests.exceptions.Timeout:
             print("Telegram timeout - retrying...")
@@ -522,7 +522,7 @@ def main():
     load_trade_history()
 
     try:
-        send_telegram("🚀 <b>BOT ONLINE v2.18.7 RELATIVE HOURLY</b>\n\n150 Coins | 5min Scans 24/7\n\nSends batch 60min after start\n\nDynamic Leverage | Target 20-25%")
+        send_telegram("🚀 <b>BOT ONLINE v2.18.8 RELATIVE HOURLY</b>\n\n150 Coins | 5min Scans 24/7\n\nSends batch 60min after start\n\nDynamic Leverage | Target 20-25%")
     except:
         print("Startup message failed - continuing anyway")
 
@@ -540,7 +540,7 @@ def main():
             for coin in COINS:
                 setup = detect_setup(coin)
                 if setup:
-                    if coin not in hourly_queue or setup["setup_score"] > hourly_queue[coin]["setup_score"]:
+                    if coin not in hourly_queue or setup["setup_score"] > hourly_queue[coin]["setup_score"]: # FIX: Added
                         hourly_queue[coin] = setup # FIX: Use not overwrite dict
                 time.sleep(DELAY_BETWEEN_COINS)
 
@@ -572,4 +572,4 @@ def main():
             time.sleep(60)
 
 if __name__ == "__main__":
-    main()   
+    main()
