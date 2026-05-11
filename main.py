@@ -1,7 +1,7 @@
-# ================= COINDCX + BINANCE VISION - PRODUCTION BOT v2.18.8 RELATIVE HOURLY =================
-# FIXED: Global vars crash | string indices crash | Telegram timeout spam
-# LOGIC: Scan 24/7 every 5min | Send BEST 3 signals every 60min from START TIME | Predict 30-60min ahead
-# DYNAMIC LEVERAGE: BTC/ETH=10x | Large=8x | Mid=5x | Volatile=3x | Target 20-25%
+# ================= COINDCX + BINANCE VISION - PRODUCTION BOT v2.18.11 FINAL =================
+# CHANGE: Fresh re-scan before batch send | Updates Entry/SL/TP to current price | Drops dead setups
+# LOGIC: Scan 24/7 every 5min | Send BEST 3 signals every 2hrs with FRESH prices | Predict 30-60min ahead
+# DYNAMIC LEVERAGE: BTC/ETH=10x | Large=8x | Mid=5x | Volatile=4x | Target 20-25%
 
 import requests
 import time
@@ -66,12 +66,13 @@ last_hourly_time = time.time()
 last_batch_time = 0
 IST = ZoneInfo("Asia/Kolkata")
 SCAN_INTERVAL = 300
-BATCH_INTERVAL = 3600 # 60min between batches - YOUR RULE
+BATCH_INTERVAL = 7200 # 2 hours
 REQUEST_TIMEOUT = 8
-TELEGRAM_TIMEOUT = 30 # FIX: Increased timeout
+TELEGRAM_TIMEOUT = 30
 DELAY_BETWEEN_COINS = 0.15
 MAX_SIGNALS_PER_HOUR = 3
 MIN_SETUP_SCORE = 75
+MAX_PRICE_DRIFT = 0.02 # 2% max price drift before re-scan
 
 # ================= UTILS =================
 def get_ist_time():
@@ -222,12 +223,12 @@ def detect_shadow_patterns(closes, highs, lows, opens, volumes, price, trend_sco
     if rsi_val > 80 and closes[-1] < opens[-1]: patterns.append("Double Top")
     if max(highs[-5:]) - min(lows[-5:]) < atr(highs,lows,closes) * 1.2: patterns.append("Scalping Setup")
     return patterns
-    # ================= DYNAMIC LEVERAGE =================
+    # ================= DYNAMIC LEVERAGE - 4X FOR VOLATILE =================
 def get_dynamic_leverage(symbol, atr_val, entry):
     atr_pct = (atr_val / entry) * 100
     if symbol in ["BTCUSDT", "ETHUSDT", "BNBUSDT"]:
         return 10 if atr_pct < 1.5 else 8
-    if atr_pct > 4.0: return 3
+    if atr_pct > 4.0: return 4 # 4x for SXP/PEPE/WIF
     elif atr_pct > 2.5: return 5
     elif atr_pct > 1.5: return 8
     else: return 10
@@ -236,7 +237,7 @@ def get_smart_sl_tp(closes, highs, lows, direction, entry, atr_val, momentum, vo
     if direction == "BUY":
         swing_low = min(lows[-10:])
         sl = swing_low - atr_val * 0.5
-        sl = max(sl, entry * 0.98)
+        sl = min(sl, entry * 0.995) # Min 0.5% SL distance
         signal_high = highs[-1]
         signal_low = lows[-1]
         ideal_entry = signal_low + (signal_high - signal_low) * 0.382
@@ -245,7 +246,7 @@ def get_smart_sl_tp(closes, highs, lows, direction, entry, atr_val, momentum, vo
     else:
         swing_high = max(highs[-10:])
         sl = swing_high + atr_val * 0.5
-        sl = min(sl, entry * 1.02)
+        sl = max(sl, entry * 1.005) # Min 0.5% SL distance
         signal_high = highs[-1]
         signal_low = lows[-1]
         ideal_entry = signal_high - (signal_high - signal_low) * 0.382
@@ -339,9 +340,9 @@ def detect_setup(coin):
 
     return best_setup
 
-# ================= ACTIVE TRADE MONITORING - FIXED GLOBAL =================
+# ================= ACTIVE TRADE MONITORING =================
 def monitor_active_trades():
-    global active_trades # FIX: Add global
+    global active_trades
     while True:
         try:
             for coin, trade in list(active_trades.items()):
@@ -360,13 +361,13 @@ def monitor_active_trades():
                 if tp_hit:
                     send_telegram(f"🎯 <b>TP HIT {coin}</b>\n\nEntry: {trade['entry']:.4f}\n\nExit: {price:.4f}\n\nProfit: +{pnl:.2f}%\n\nPattern: {trade['pattern']}")
                     track_pattern_result(trade["pattern"], pnl)
-                    del active_trades[coin]
+                    del active_trades
                     continue
 
                 if sl_hit:
                     send_telegram(f"🛑 <b>SL HIT {coin}</b>\n\nEntry: {trade['entry']:.4f}\n\nExit: {price:.4f}\n\nLoss: {pnl:.2f}%\n\nPattern: {trade['pattern']}")
                     track_pattern_result(trade["pattern"], pnl)
-                    del active_trades[coin]
+                    del active_trades
                     continue
 
                 sl_distance = abs(trade["entry"] - trade["initial_sl"])
@@ -382,9 +383,9 @@ def monitor_active_trades():
         except Exception as e:
             print(f"Monitor error: {e}")
         time.sleep(30)
-        # ================= TELEGRAM BUTTON HANDLER - FIXED GLOBAL =================
+        # ================= TELEGRAM BUTTON HANDLER =================
 def handle_updates():
-    global last_update_id, active_trades, pending_signals # FIX: Add globals
+    global last_update_id, active_trades, pending_signals
     while True:
         try:
             url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates"
@@ -398,13 +399,13 @@ def handle_updates():
                     coin = data.split("_")[1]
                     if data.startswith("ACTIVATE_"):
                         if coin in pending_signals:
-                            active_trades[coin] = pending_signals[coin] # FIX: Only activate one coin
+                            active_trades = pending_signals
                             send_telegram(f"✅ <b>Tracking Activated</b> for {coin}\n\nTP/SL + Reversal + Hourly alerts ON.")
                             answer_callback(cq["id"], "Tracking ON ✅")
-                            del pending_signals[coin]
+                            del pending_signals
                     elif data.startswith("IGNORE_"):
                         if coin in pending_signals:
-                            del pending_signals[coin]
+                            del pending_signals
                         answer_callback(cq["id"], "Ignored")
         except requests.exceptions.Timeout:
             print("Telegram timeout - retrying...")
@@ -461,22 +462,49 @@ def send_hourly_pnl_update():
     msg += f"<b>Total PnL: {total_pnl:+.2f}%</b>\n\nActive: {len(active_trades)} trades"
     send_telegram(msg)
 
-# ================= HOURLY BATCH SENDER - RELATIVE TIME =================
+# ================= HOURLY BATCH SENDER - FRESH SCAN BEFORE SEND =================
 def send_hourly_signal_batch():
     global hourly_queue, pending_signals, last_batch_time
     if not hourly_queue:
-        send_telegram(f"📡 <b>HOURLY SCAN COMPLETE</b> - {get_ist_time()}\n\nNo setups forming.\n\nNext batch in 1 hour.")
+        send_telegram(f"📡 <b>HOURLY SCAN COMPLETE</b> - {get_ist_time()}\n\nNo setups forming.\n\nNext batch in 2 hours.")
         last_batch_time = time.time()
         return
 
-    sorted_setups = sorted(hourly_queue.values(), key=lambda x: x["setup_score"], reverse=True)[:MAX_SIGNALS_PER_HOUR]
-    send_telegram(f"🎯 <b>HOURLY SIGNAL BATCH</b> - {get_ist_time()}\n\n{len(sorted_setups)} setups ready:")
+    send_telegram(f"🔄 <b>RE-SCANNING SIGNALS</b> - {get_ist_time()}\n\nValidating setups with fresh prices...")
+
+    # FRESH SCAN: Re-check each coin in queue before sending
+    fresh_setups = []
+    for old_sig in hourly_queue.values():
+        coin = old_sig['coin']
+        fresh_setup = detect_setup(coin) # Re-run full detection NOW
+
+        if fresh_setup and fresh_setup['direction'] == old_sig['direction']:
+            # Setup still valid - update to fresh price
+            price_drift = abs(fresh_setup['entry'] - old_sig['entry']) / old_sig['entry']
+            if price_drift < MAX_PRICE_DRIFT: # <2% drift acceptable
+                fresh_setups.append(fresh_setup)
+                print(f"{coin}: Fresh price {fresh_setup['entry']:.4f} vs old {old_sig['entry']:.4f}")
+            else:
+                print(f"{coin}: Price drift {price_drift*100:.1f}% - skipping")
+        else:
+            print(f"{coin}: Pattern broke - skipping")
+        time.sleep(0.2) # Rate limit
+
+    if not fresh_setups:
+        send_telegram(f"📡 <b>BATCH CANCELLED</b> - {get_ist_time()}\n\nAll setups expired. Next batch in 2 hours.")
+        hourly_queue.clear()
+        last_batch_time = time.time()
+        return
+
+    # Sort fresh setups and send best 3
+    sorted_setups = sorted(fresh_setups, key=lambda x: x["setup_score"], reverse=True)[:MAX_SIGNALS_PER_HOUR]
+    send_telegram(f"🎯 <b>HOURLY SIGNAL BATCH</b> - {get_ist_time()}\n\n{len(sorted_setups)} fresh setups ready:")
 
     for sig in sorted_setups:
         pending_signals[sig['coin']] = sig
         pattern_wr = round(pattern_stats[sig['pattern']]['wins']/max(1,pattern_stats[sig['pattern']]['signals'])*100,1)
 
-        msg = f'''🔥 <b>SETUP {sig['coin']}</b> | Score: {sig['setup_score']}/100
+        msg = f'''🔥 <b>SETUP {sig['coin']}</b> | Score: {sig['setup_score']}/100 [FRESH]
 
 📢 Direction: {sig['direction']}
 📊 Leverage: {sig['leverage']}x
@@ -516,13 +544,13 @@ def send_hourly_signal_batch():
     hourly_queue.clear()
     last_batch_time = time.time()
 
-# ================= MAIN LOOP - RELATIVE HOURLY - FIXED =================
+# ================= MAIN LOOP - 2HR BATCH - FINAL =================
 def main():
     global last_report_time, last_hourly_time, last_batch_time, hourly_queue
     load_trade_history()
 
     try:
-        send_telegram("🚀 <b>BOT ONLINE v2.18.8 RELATIVE HOURLY</b>\n\n150 Coins | 5min Scans 24/7\n\nSends batch 60min after start\n\nDynamic Leverage | Target 20-25%")
+        send_telegram("🚀 <b>BOT ONLINE v2.18.11 FINAL</b>\n\n150 Coins | 5min Scans 24/7\n\nSends batch every 2 hours with FRESH prices\n\nDynamic Leverage: 10x/8x/5x/4x | Target 20-25%")
     except:
         print("Startup message failed - continuing anyway")
 
@@ -540,11 +568,11 @@ def main():
             for coin in COINS:
                 setup = detect_setup(coin)
                 if setup:
-                    if coin not in hourly_queue or setup["setup_score"] > hourly_queue[coin]["setup_score"]: # FIX: Added
-                        hourly_queue[coin] = setup # FIX: Use not overwrite dict
+                    if coin not in hourly_queue or setup["setup_score"] > hourly_queue["setup_score"]:
+                        hourly_queue = setup
                 time.sleep(DELAY_BETWEEN_COINS)
 
-            # SEND BATCH: First run OR every 60min from last batch
+            # SEND BATCH: First run OR every 2hrs from last batch
             if first_run or (time.time() - last_batch_time >= BATCH_INTERVAL):
                 send_hourly_signal_batch()
                 first_run = False
