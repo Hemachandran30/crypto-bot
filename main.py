@@ -1,5 +1,5 @@
-# ================= COINDCX + BINANCE VISION - PRODUCTION BOT v2.18.11 FINAL =================
-# CHANGE: Fresh re-scan before batch send | Updates Entry/SL/TP to current price | Drops dead setups
+# ================= COINDCX + BINANCE VISION - PRODUCTION BOT v2.18.13 FINAL =================
+# HOTFIX: Dict handling bugs | del active_trades[coin] | hourly_queue[coin] = setup | active_trades[coin] = signal
 # LOGIC: Scan 24/7 every 5min | Send BEST 3 signals every 2hrs with FRESH prices | Predict 30-60min ahead
 # DYNAMIC LEVERAGE: BTC/ETH=10x | Large=8x | Mid=5x | Volatile=4x | Target 20-25%
 
@@ -122,7 +122,7 @@ def load_trade_history():
             pattern_stats = json.load(f)
     except:
         print("No history file, starting fresh")
-        # ================= DATA FETCH =================
+       # ================= DATA FETCH =================
 def get_price(symbol):
     try:
         res = requests.get(BINANCE_PRICE_URL, params={"symbol": symbol}, timeout=REQUEST_TIMEOUT)
@@ -223,7 +223,7 @@ def detect_shadow_patterns(closes, highs, lows, opens, volumes, price, trend_sco
     if rsi_val > 80 and closes[-1] < opens[-1]: patterns.append("Double Top")
     if max(highs[-5:]) - min(lows[-5:]) < atr(highs,lows,closes) * 1.2: patterns.append("Scalping Setup")
     return patterns
-    # ================= DYNAMIC LEVERAGE - 4X FOR VOLATILE =================
+# ================= DYNAMIC LEVERAGE - 4X FOR VOLATILE =================
 def get_dynamic_leverage(symbol, atr_val, entry):
     atr_pct = (atr_val / entry) * 100
     if symbol in ["BTCUSDT", "ETHUSDT", "BNBUSDT"]:
@@ -340,7 +340,7 @@ def detect_setup(coin):
 
     return best_setup
 
-# ================= ACTIVE TRADE MONITORING =================
+# ================= ACTIVE TRADE MONITORING - FIXED =================
 def monitor_active_trades():
     global active_trades
     while True:
@@ -361,13 +361,13 @@ def monitor_active_trades():
                 if tp_hit:
                     send_telegram(f"🎯 <b>TP HIT {coin}</b>\n\nEntry: {trade['entry']:.4f}\n\nExit: {price:.4f}\n\nProfit: +{pnl:.2f}%\n\nPattern: {trade['pattern']}")
                     track_pattern_result(trade["pattern"], pnl)
-                    del active_trades
+                    del active_trades[coin] # FIXED: Was del active_trades
                     continue
 
                 if sl_hit:
                     send_telegram(f"🛑 <b>SL HIT {coin}</b>\n\nEntry: {trade['entry']:.4f}\n\nExit: {price:.4f}\n\nLoss: {pnl:.2f}%\n\nPattern: {trade['pattern']}")
                     track_pattern_result(trade["pattern"], pnl)
-                    del active_trades
+                    del active_trades[coin] # FIXED: Was del active_trades
                     continue
 
                 sl_distance = abs(trade["entry"] - trade["initial_sl"])
@@ -383,7 +383,7 @@ def monitor_active_trades():
         except Exception as e:
             print(f"Monitor error: {e}")
         time.sleep(30)
-        # ================= TELEGRAM BUTTON HANDLER =================
+        # ================= TELEGRAM BUTTON HANDLER - FIXED =================
 def handle_updates():
     global last_update_id, active_trades, pending_signals
     while True:
@@ -399,13 +399,13 @@ def handle_updates():
                     coin = data.split("_")[1]
                     if data.startswith("ACTIVATE_"):
                         if coin in pending_signals:
-                            active_trades = pending_signals
+                            active_trades[coin] = pending_signals[coin] # FIXED: Was active_trades = pending_signals
                             send_telegram(f"✅ <b>Tracking Activated</b> for {coin}\n\nTP/SL + Reversal + Hourly alerts ON.")
                             answer_callback(cq["id"], "Tracking ON ✅")
-                            del pending_signals
+                            del pending_signals[coin] # FIXED: Was del pending_signals
                     elif data.startswith("IGNORE_"):
                         if coin in pending_signals:
-                            del pending_signals
+                            del pending_signals[coin] # FIXED: Was del pending_signals
                         answer_callback(cq["id"], "Ignored")
         except requests.exceptions.Timeout:
             print("Telegram timeout - retrying...")
@@ -544,13 +544,13 @@ def send_hourly_signal_batch():
     hourly_queue.clear()
     last_batch_time = time.time()
 
-# ================= MAIN LOOP - 2HR BATCH - FINAL =================
+# ================= MAIN LOOP - 2HR BATCH - FINAL - FIXED =================
 def main():
     global last_report_time, last_hourly_time, last_batch_time, hourly_queue
     load_trade_history()
 
     try:
-        send_telegram("🚀 <b>BOT ONLINE v2.18.11 FINAL</b>\n\n150 Coins | 5min Scans 24/7\n\nSends batch every 2 hours with FRESH prices\n\nDynamic Leverage: 10x/8x/5x/4x | Target 20-25%")
+        send_telegram("🚀 <b>BOT ONLINE v2.18.13 FINAL</b>\n\n150 Coins | 5min Scans 24/7\n\nSends batch every 2 hours with FRESH prices\n\nDynamic Leverage: 10x/8x/5x/4x | Target 20-25%")
     except:
         print("Startup message failed - continuing anyway")
 
@@ -564,12 +564,12 @@ def main():
         try:
             scan_start = time.time()
 
-            # SCAN ALL COINS EVERY 5 MINUTES - BUILD QUEUE
+            # SCAN ALL COINS EVERY 5 MINUTES - BUILD QUEUE - FIXED
             for coin in COINS:
                 setup = detect_setup(coin)
                 if setup:
-                    if coin not in hourly_queue or setup["setup_score"] > hourly_queue["setup_score"]:
-                        hourly_queue = setup
+                    if coin not in hourly_queue or setup["setup_score"] > hourly_queue[coin]["setup_score"]:
+                        hourly_queue[coin] = setup # FIXED: Was hourly_queue = setup
                 time.sleep(DELAY_BETWEEN_COINS)
 
             # SEND BATCH: First run OR every 2hrs from last batch
