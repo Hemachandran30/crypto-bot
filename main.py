@@ -1,5 +1,5 @@
-# ================= COINDCX + BINANCE VISION - PRODUCTION BOT v2.18.15 FINAL =================
-# FIXED: Dict bugs in scan_market, send_hourly_batch, check_active_trades, handle_telegram_commands
+# ================= COINDCX + BINANCE VISION - PRODUCTION BOT v2.18.16 FINAL =================
+# FIXED: Dict bugs | Auto-verify CoinDCX | Dynamic decimals | Tiered SL 2%/3%/4%/5%
 # LOGIC: Scan 24/7 every 5min | Send BEST 3 signals every 2hrs with FRESH prices
 # RISK: BTC/ETH=2% | BNB/SOL=3% | Mid=4% | Volatile=5% max SL distance
 
@@ -629,11 +629,11 @@ def send_hourly_report():
 
 def main():
     global last_report_time, last_batch_time
-    print("🚀 Bot v2.18.15 FINAL starting...")
+    print("🚀 Bot v2.18.16 FINAL starting...")
     load_trade_history()
     verify_coins()
 
-    send_telegram(f"🚀 <b>Bot v2.18.15 FINAL Started</b>\n\n<b>Coins:</b> {len(COINS)} verified on CoinDCX\n<b>Risk Caps:</b> BTC/ETH 2% | BNB/SOL 3% | Mid 4% | Vol 5%\n<b>Max Risk:</b> 24%\n\nScanning every 5min, batches every 2hrs")
+    send_telegram(f"🚀 <b>Bot v2.18.16 FINAL Started</b>\n\n<b>Coins:</b> {len(COINS)} verified on CoinDCX\n<b>Risk Caps:</b> BTC/ETH 2% | BNB/SOL 3% | Mid 4% | Vol 5%\n<b>Max Risk:</b> 24%\n\nScanning every 5min, batches every 2hrs")
 
     while True:
         try:
