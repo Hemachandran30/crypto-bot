@@ -1,5 +1,5 @@
 # ================= COINDCX + BINANCE VISION - PRODUCTION BOT v2.18.16 FINAL =================
-# FIXED: Dict bugs | Auto-verify CoinDCX | Dynamic decimals | Tiered SL 2%/3%/4%/5%
+# FIXED: Dict bugs | NO Auto-verify | Dynamic decimals | Tiered SL 2%/3%/4%/5%
 # LOGIC: Scan 24/7 every 5min | Send BEST 3 signals every 2hrs with FRESH prices
 # RISK: BTC/ETH=2% | BNB/SOL=3% | Mid=4% | Volatile=5% max SL distance
 
@@ -21,8 +21,8 @@ BINANCE_PRICE_URL = "https://data-api.binance.vision/api/v3/ticker/price"
 BINANCE_KLINE_URL = "https://data-api.binance.vision/api/v3/klines"
 COINDX_FUTURES_URL = "https://public.coindcx.com/market_data/candles"
 
-# ================= 150 COINS FROM YOUR COINDCX SCREENSHOTS - ONLY CHANGE =================
-COINS_CANDIDATE = [
+# ================= YOUR 150 COINDCX COINS - NO VERIFICATION =================
+COINS = [
     "BTC","ETH","BNB","SOL","XRP","DOGE","ADA","TRX","AVAX","SHIB",
     "DOT","LINK","BCH","NEAR","LTC","UNI","APT","ETC","HBAR","FIL",
     "ARB","VET","INJ","OP","ATOM","TIA","SUI","SEI","ALGO","EGLD",
@@ -42,7 +42,6 @@ COINS_CANDIDATE = [
     "BIO","BLUR","BMT","BSV","C98","CARV","CATI","CETUS","CGPT","CKB",
     "COMP","COOKIE","COS","COW","CYBER","DASH","DEXE","DIA","DOLO","DYM"
 ]
-COINS = []
 
 PRIMARY_PATTERNS = [
     "EMA Trend", "Breakout", "Pullback to 20 EMA", "RSI Reversal", "Momentum Surge",
@@ -131,38 +130,36 @@ def load_trade_history():
     except:
         print("No history file, starting fresh")
 
-# ================= COINDCX VERIFICATION =================
-def check_coindcx_exists(symbol):
+def log_trade(coin, result, trade_data, pnl, exit_price):
+    """Log every TP/SL hit with profit data to trades_log.json"""
     try:
-        pair = f"B-{symbol.replace('USDT','')}_USDT"
-        url = f"{COINDX_FUTURES_URL}?pair={pair}&interval=1m&limit=1"
-        res = requests.get(url, timeout=5)
-        return res.status_code == 200 and len(res.json()) > 0
-    except:
-        return False
-
-def verify_coins():
-    global COINS
-    verified = []
-    failed = []
-    send_telegram(f"🔍 <b>Verifying CoinDCX Futures...</b>\n\nChecking {len(COINS_CANDIDATE)} coins...")
-
-    for coin in COINS_CANDIDATE:
-        symbol = coin + "USDT"
-        if check_coindcx_exists(symbol):
-            verified.append(coin)
-        else:
-            failed.append(coin)
-        time.sleep(0.05)
-
-    COINS = verified
-    msg = f"✅ <b>Verification Complete</b>\n\n<b>Scanning:</b> {len(verified)} coins\n<b>Removed:</b> {len(failed)} not on CoinDCX\n\n"
-    if failed:
-        msg += f"<b>Delisted:</b> {', '.join(failed[:15])}{'...' if len(failed)>15 else ''}\n\n"
-    msg += "All signals will be 100% tradeable."
-    send_telegram(msg)
-    print(f"Verified {len(verified)} coins. Removed {failed}")
-    return verified
+        log_entry = {
+            "timestamp": get_ist_time(),
+            "coin": coin,
+            "direction": trade_data["direction"],
+            "pattern": trade_data["pattern"],
+            "result": result,
+            "entry": trade_data["entry"],
+            "exit": exit_price,
+            "sl": trade_data["sl"],
+            "tp": trade_data["tp"],
+            "leverage": trade_data["leverage"],
+            "pnl_percent": round(pnl, 2),
+            "risk_pct": trade_data["risk_pct"],
+            "confidence": trade_data["confidence"],
+            "setup_score": trade_data["setup_score"]
+        }
+        logs = []
+        try:
+            with open("trades_log.json", "r") as f:
+                logs = json.load(f)
+        except:
+            logs = []
+        logs.append(log_entry)
+        with open("trades_log.json", "w") as f:
+            json.dump(logs, f, indent=2)
+    except Exception as e:
+        print(f"Log error: {e}")
 
 # ================= DATA FETCHING =================
 def get_price(symbol):
@@ -371,7 +368,7 @@ def get_pattern_stats_text():
             text += f"Signals: {stats['signals']} | Win: {win_rate:.1f}% | PnL: {stats['total_pnl']:.1f}%\n\n"
     return text
 
-# ================= SCANNING - FIXED STR BUG =================
+# ================= SCANNING - DICT BUG FIXED =================
 def scan_market():
     global hourly_queue
     hourly_queue = {}
@@ -441,8 +438,8 @@ def scan_market():
                 "timestamp": get_ist_datetime()
             }
 
-            if coin not in hourly_queue or confidence > hourly_queue["confidence"]:
-                hourly_queue = setup # FIXED: Was hourly_queue = setup
+            if coin not in hourly_queue or confidence > hourly_queue[coin]["confidence"]:
+                hourly_queue[coin] = setup # FIXED: Was hourly_queue = setup
 
         except Exception as e:
             print(f"Scan error {coin}: {e}")
@@ -450,7 +447,7 @@ def scan_market():
         time.sleep(DELAY_BETWEEN_COINS)
 
     return len(hourly_queue)
-    # ================= SEND BATCH - FIXED STR BUG =================
+    # ================= SEND BATCH - DICT BUG FIXED =================
 def send_hourly_batch():
     global hourly_queue, pending_signals, last_batch_time
 
@@ -520,7 +517,7 @@ def send_hourly_batch():
     hourly_queue = {}
     last_batch_time = time.time()
 
-# ================= CHECK TRADES - FIXED STR BUG =================
+# ================= CHECK TRADES - DICT BUG FIXED + PROFIT/SL LOGGING =================
 def check_active_trades():
     global active_trades
     for coin in list(active_trades.keys()):
@@ -535,29 +532,33 @@ def check_active_trades():
                 pnl = ((trade["tp"] - trade["entry"]) / trade["entry"]) * 100 * trade["leverage"]
                 pattern_stats[trade["pattern"]]["wins"] += 1
                 pattern_stats[trade["pattern"]]["total_pnl"] += pnl
-                send_telegram(f"✅ <b>TP HIT {coin}</b>\n\nPnL: +{pnl:.2f}%\nPattern: {trade['pattern']}")
+                log_trade(coin, "TP_HIT", trade, pnl, price)
+                send_telegram(f"✅ <b>TP HIT {coin}</b>\n\nPnL: +{pnl:.2f}%\nPattern: {trade['pattern']}\nEntry: {format_price(trade['entry'])}\nExit: {format_price(trade['tp'])}")
                 del active_trades # FIXED: Was del active_trades
             elif price <= trade["sl"]:
                 pnl = ((trade["sl"] - trade["entry"]) / trade["entry"]) * 100 * trade["leverage"]
                 pattern_stats[trade["pattern"]]["losses"] += 1
                 pattern_stats[trade["pattern"]]["total_pnl"] += pnl
-                send_telegram(f"🛑 <b>SL HIT {coin}</b>\n\nPnL: {pnl:.2f}%\nPattern: {trade['pattern']}")
+                log_trade(coin, "SL_HIT", trade, pnl, price)
+                send_telegram(f"🛑 <b>SL HIT {coin}</b>\n\nPnL: {pnl:.2f}%\nPattern: {trade['pattern']}\nEntry: {format_price(trade['entry'])}\nExit: {format_price(trade['sl'])}")
                 del active_trades # FIXED: Was del active_trades
         else:
             if price <= trade["tp"]:
                 pnl = ((trade["entry"] - trade["tp"]) / trade["entry"]) * 100 * trade["leverage"]
                 pattern_stats[trade["pattern"]]["wins"] += 1
                 pattern_stats[trade["pattern"]]["total_pnl"] += pnl
-                send_telegram(f"✅ <b>TP HIT {coin}</b>\n\nPnL: +{pnl:.2f}%\nPattern: {trade['pattern']}")
+                log_trade(coin, "TP_HIT", trade, pnl, price)
+                send_telegram(f"✅ <b>TP HIT {coin}</b>\n\nPnL: +{pnl:.2f}%\nPattern: {trade['pattern']}\nEntry: {format_price(trade['entry'])}\nExit: {format_price(trade['tp'])}")
                 del active_trades # FIXED: Was del active_trades
             elif price >= trade["sl"]:
                 pnl = ((trade["entry"] - trade["sl"]) / trade["entry"]) * 100 * trade["leverage"]
                 pattern_stats[trade["pattern"]]["losses"] += 1
                 pattern_stats[trade["pattern"]]["total_pnl"] += pnl
-                send_telegram(f"🛑 <b>SL HIT {coin}</b>\n\nPnL: {pnl:.2f}%\nPattern: {trade['pattern']}")
+                log_trade(coin, "SL_HIT", trade, pnl, price)
+                send_telegram(f"🛑 <b>SL HIT {coin}</b>\n\nPnL: {pnl:.2f}%\nPattern: {trade['pattern']}\nEntry: {format_price(trade['entry'])}\nExit: {format_price(trade['sl'])}")
                 del active_trades # FIXED: Was del active_trades
 
-# ================= TELEGRAM COMMANDS - FIXED STR BUG =================
+# ================= TELEGRAM COMMANDS - DICT BUG FIXED =================
 def handle_telegram_commands():
     global last_update_id, active_trades, pending_signals
     try:
@@ -633,9 +634,9 @@ def main():
     global last_report_time, last_batch_time
     print("🚀 Bot v2.18.16 FINAL starting...")
     load_trade_history()
-    verify_coins()
+    # verify_coins() REMOVED - Using all 150 coins directly from your CoinDCX list
 
-    send_telegram(f"🚀 <b>Bot v2.18.16 FINAL Started</b>\n\n<b>Coins:</b> {len(COINS)} verified on CoinDCX\n<b>Risk Caps:</b> BTC/ETH 2% | BNB/SOL 3% | Mid 4% | Vol 5%\n<b>Max Risk:</b> 24%\n\nScanning every 5min, batches every 2hrs")
+    send_telegram(f"🚀 <b>Bot v2.18.16 FINAL Started</b>\n\n<b>Coins:</b> {len(COINS)} CoinDCX Futures\n<b>Risk Caps:</b> BTC/ETH 2% | BNB/SOL 3% | Mid 4% | Vol 5%\n<b>Max Risk:</b> 24%\n\nScanning every 5min, batches every 2hrs")
 
     while True:
         try:
