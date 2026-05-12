@@ -274,7 +274,7 @@ def check_trend_reversal(symbol, direction, entry):
     elif direction == "SELL" and current_price > ema20 * 1.005:
         return True
     return False
-    # ================= PATTERN DETECTION =================
+# ================= PATTERN DETECTION =================
 def detect_patterns(symbol, klines, price):
     if len(klines) < 50: return []
     closes = [float(k[4]) for k in klines]
@@ -387,7 +387,7 @@ def get_pattern_stats_text():
             text += f"Signals: {stats['signals']} | Win: {win_rate:.1f}% | PnL: {stats['total_pnl']:.1f}%\n\n"
     return text
 
-# ================= SCANNING =================
+# ================= SCANNING - FIXED: hourly_queue[coin] = setup =================
 def scan_market():
     global hourly_queue
     hourly_queue = {}
@@ -466,7 +466,7 @@ def scan_market():
         time.sleep(DELAY_BETWEEN_COINS)
 
     return len(hourly_queue)
-    # ================= SEND BATCH =================
+    # ================= SEND BATCH - FIXED: pending_signals[coin] = setup =================
 def send_hourly_batch():
     global hourly_queue, pending_signals, last_batch_time
 
@@ -536,7 +536,7 @@ def send_hourly_batch():
     hourly_queue = {}
     last_batch_time = time.time()
 
-# ================= CHECK TRADES =================
+# ================= CHECK TRADES - FIXED: trade = active_trades[coin] | del active_trades[coin] =================
 def check_active_trades():
     global active_trades, last_trade_update
     current_time = time.time()
@@ -611,7 +611,7 @@ def check_active_trades():
 
             send_telegram(msg)
             last_trade_update[coin] = current_time
-            # ================= TELEGRAM COMMANDS =================
+            # ================= TELEGRAM COMMANDS - FIXED: active_trades = pending_signals =================
 def handle_telegram_commands():
     global last_update_id, active_trades, pending_signals
     try:
