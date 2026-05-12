@@ -1,5 +1,5 @@
-# ================= COINDCX + BINANCE VISION - PRODUCTION BOT v2.18.16 FINAL =================
-# FIXED: Dict bugs | Auto-verify CoinDCX | Dynamic decimals | Tiered SL 2%/3%/4%/5%
+# ================= COINDCX + BINANCE VISION - PRODUCTION BOT v2.18.17 FINAL =================
+# FIXED: All dict bugs | Auto-verify CoinDCX | Dynamic decimals | Tiered SL 2%/3%/4%/5%
 # LOGIC: Scan 24/7 every 5min | Send BEST 3 signals every 2hrs with FRESH prices
 # RISK: BTC/ETH=2% | BNB/SOL=3% | Mid=4% | Volatile=5% max SL distance
 
@@ -162,7 +162,7 @@ def verify_coins():
     send_telegram(msg)
     print(f"Verified {len(verified)} coins. Removed {failed}")
     return verified
-    # ================= DATA FETCHING =================
+# ================= DATA FETCHING =================
 def get_price(symbol):
     try:
         res = requests.get(BINANCE_PRICE_URL, params={"symbol": symbol}, timeout=REQUEST_TIMEOUT)
@@ -256,7 +256,7 @@ def calculate_atr(klines, period=14):
         tr = max(high - low, abs(high - prev_close), abs(low - prev_close))
         trs.append(tr)
     return sum(trs[-period:]) / period if len(trs) >= period else 0
-    # ================= PATTERN DETECTION =================
+# ================= PATTERN DETECTION =================
 def detect_patterns(symbol, klines, price):
     if len(klines) < 50: return []
     closes = [float(k[4]) for k in klines]
@@ -368,7 +368,7 @@ def get_pattern_stats_text():
             text += f"<b>{pattern}</b>\n"
             text += f"Signals: {stats['signals']} | Win: {win_rate:.1f}% | PnL: {stats['total_pnl']:.1f}%\n\n"
     return text
-    # ================= SCANNING - FIXED DICT BUG =================
+    # ================= SCANNING - FIXED: hourly_queue dict =================
 def scan_market():
     global hourly_queue
     hourly_queue = {}
@@ -438,8 +438,9 @@ def scan_market():
                 "timestamp": get_ist_datetime()
             }
 
-            if coin not in hourly_queue or confidence > hourly_queue["confidence"]:
-                hourly_queue = setup
+            # FIX: Store by coin key, compare confidence correctly
+            if coin not in hourly_queue or confidence > hourly_queue[coin]["confidence"]:
+                hourly_queue[coin] = setup
 
         except Exception as e:
             print(f"Scan error {coin}: {e}")
@@ -448,7 +449,7 @@ def scan_market():
 
     return len(hourly_queue)
 
-# ================= SEND BATCH - FIXED DICT BUG =================
+# ================= SEND BATCH - FIXED: pending_signals dict =================
 def send_hourly_batch():
     global hourly_queue, pending_signals, last_batch_time
 
@@ -511,18 +512,19 @@ def send_hourly_batch():
 
         msg += f"\n<b>Active Trades:</b>\n{get_active_trades_text()}"
 
-        pending_signals = setup
+        # FIX: Store by coin key
+        pending_signals[coin] = setup
         send_telegram(msg, coin=coin, add_buttons=True)
         time.sleep(1)
 
     hourly_queue = {}
     last_batch_time = time.time()
 
-# ================= CHECK TRADES - FIXED DICT BUG =================
+# ================= CHECK TRADES - FIXED: Index dict =================
 def check_active_trades():
     global active_trades
     for coin in list(active_trades.keys()):
-        trade = active_trades
+        trade = active_trades[coin] # FIX: Index by coin
         symbol = trade["symbol"]
 
         price = get_price(symbol)
@@ -534,28 +536,28 @@ def check_active_trades():
                 pattern_stats[trade["pattern"]]["wins"] += 1
                 pattern_stats[trade["pattern"]]["total_pnl"] += pnl
                 send_telegram(f"✅ <b>TP HIT {coin}</b>\n\nPnL: +{pnl:.2f}%\nPattern: {trade['pattern']}")
-                del active_trades
+                del active_trades[coin] # FIX: Delete by key
             elif price <= trade["sl"]:
                 pnl = ((trade["sl"] - trade["entry"]) / trade["entry"]) * 100 * trade["leverage"]
                 pattern_stats[trade["pattern"]]["losses"] += 1
                 pattern_stats[trade["pattern"]]["total_pnl"] += pnl
                 send_telegram(f"🛑 <b>SL HIT {coin}</b>\n\nPnL: {pnl:.2f}%\nPattern: {trade['pattern']}")
-                del active_trades
+                del active_trades[coin] # FIX: Delete by key
         else:
             if price <= trade["tp"]:
                 pnl = ((trade["entry"] - trade["tp"]) / trade["entry"]) * 100 * trade["leverage"]
                 pattern_stats[trade["pattern"]]["wins"] += 1
                 pattern_stats[trade["pattern"]]["total_pnl"] += pnl
                 send_telegram(f"✅ <b>TP HIT {coin}</b>\n\nPnL: +{pnl:.2f}%\nPattern: {trade['pattern']}")
-                del active_trades
+                del active_trades[coin] # FIX: Delete by key
             elif price >= trade["sl"]:
                 pnl = ((trade["entry"] - trade["sl"]) / trade["entry"]) * 100 * trade["leverage"]
                 pattern_stats[trade["pattern"]]["losses"] += 1
                 pattern_stats[trade["pattern"]]["total_pnl"] += pnl
                 send_telegram(f"🛑 <b>SL HIT {coin}</b>\n\nPnL: {pnl:.2f}%\nPattern: {trade['pattern']}")
-                del active_trades
+                del active_trades[coin] # FIX: Delete by key
 
-# ================= TELEGRAM COMMANDS - FIXED DICT BUG =================
+# ================= TELEGRAM COMMANDS - FIXED: Dict assignment =================
 def handle_telegram_commands():
     global last_update_id, active_trades, pending_signals
     try:
@@ -575,16 +577,16 @@ def handle_telegram_commands():
                 if data.startswith("ACTIVATE_"):
                     coin = data.replace("ACTIVATE_", "")
                     if coin in pending_signals:
-                        active_trades = pending_signals
-                        pattern_stats[pending_signals["pattern"]]["signals"] += 1
-                        del pending_signals
+                        active_trades[coin] = pending_signals[coin] # FIX: Dict assignment by key
+                        pattern_stats[pending_signals[coin]["pattern"]]["signals"] += 1
+                        del pending_signals[coin] # FIX: Delete by key
                         answer_callback(callback_id, f"✅ {coin} Activated")
                         send_telegram(f"✅ <b>{coin} Trade Activated</b>\n\nNow monitoring for TP/SL")
 
                 elif data.startswith("IGNORE_"):
                     coin = data.replace("IGNORE_", "")
                     if coin in pending_signals:
-                        del pending_signals
+                        del pending_signals[coin] # FIX: Delete by key
                         answer_callback(callback_id, f"❌ {coin} Ignored")
 
             elif "message" in update:
@@ -629,11 +631,11 @@ def send_hourly_report():
 
 def main():
     global last_report_time, last_batch_time
-    print("🚀 Bot v2.18.16 FINAL starting...")
+    print("🚀 Bot v2.18.17 FINAL starting...")
     load_trade_history()
     verify_coins()
 
-    send_telegram(f"🚀 <b>Bot v2.18.16 FINAL Started</b>\n\n<b>Coins:</b> {len(COINS)} verified on CoinDCX\n<b>Risk Caps:</b> BTC/ETH 2% | BNB/SOL 3% | Mid 4% | Vol 5%\n<b>Max Risk:</b> 24%\n\nScanning every 5min, batches every 2hrs")
+    send_telegram(f"🚀 <b>Bot v2.18.17 FINAL Started</b>\n\n<b>Coins:</b> {len(COINS)} verified on CoinDCX\n<b>Risk Caps:</b> BTC/ETH 2% | BNB/SOL 3% | Mid 4% | Vol 5%\n<b>Max Risk:</b> 24%\n\nScanning every 5min, batches every 2hrs")
 
     while True:
         try:
