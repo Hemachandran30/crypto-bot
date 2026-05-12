@@ -1,5 +1,5 @@
 # ================= COINDCX + BINANCE VISION - PRODUCTION BOT v2.18.18 FINAL =================
-# FIXED: All 8 Dict bugs | 20% Min Profit | 30-min Trade Updates | Momentum/Velocity Fix
+# FIXED: All Dict bugs causing 'string indices' error | 20% Min Profit | 30-min Trade Updates
 # Pattern Success Tracking | TP/SL/Trend Alerts | Dynamic decimals | Tiered SL
 # LOGIC: Scan 24/7 every 5min | Send BEST 3 signals every 2hrs with FRESH prices
 
@@ -61,7 +61,7 @@ ALL_PATTERNS = PRIMARY_PATTERNS + SHADOW_PATTERNS
 active_trades = {}
 pending_signals = {}
 hourly_queue = {}
-last_trade_update = {} # NEW: 30-min tracking per coin
+last_trade_update = {}
 pattern_stats = {p: {"signals":0,"wins":0,"losses":0,"total_pnl":0} for p in ALL_PATTERNS}
 last_update_id = None
 last_report_time = time.time()
@@ -70,14 +70,15 @@ last_batch_time = 0
 IST = ZoneInfo("Asia/Kolkata")
 SCAN_INTERVAL = 300
 BATCH_INTERVAL = 7200
-TRADE_UPDATE_INTERVAL = 1800 # NEW: 30 mins
+TRADE_UPDATE_INTERVAL = 1800
 REQUEST_TIMEOUT = 8
 TELEGRAM_TIMEOUT = 30
 DELAY_BETWEEN_COINS = 0.15
 MAX_SIGNALS_PER_HOUR = 3
 MIN_SETUP_SCORE = 85
 MAX_PRICE_DRIFT = 0.02
-MIN_PROFIT_TARGET = 20.0 # NEW: Minimum 20% profit per trade
+MIN_PROFIT_TARGET = 20.0
+
 # ================= UTILS - DYNAMIC DECIMAL FIX =================
 def format_price(price):
     if price >= 1000: return f"{price:.2f}"
@@ -138,7 +139,6 @@ def load_trade_history():
         print("No history file, starting fresh")
 
 def log_trade(coin, result, trade_data, pnl, exit_price):
-    """Log every TP/SL hit with profit data to trades_log.json"""
     try:
         log_entry = {
             "timestamp": get_ist_time(),
@@ -213,7 +213,6 @@ def get_liquidity_zone(symbol, entry, direction):
         resistance = max(highs[-10:])
         return resistance * 1.002 if entry < resistance else None
 
-# ================= DYNAMIC LEVERAGE =================
 def get_dynamic_leverage(symbol, atr_pct, confidence):
     base = symbol.replace("USDT", "")
     if base in ["BTC", "ETH"]: return 10
@@ -222,7 +221,6 @@ def get_dynamic_leverage(symbol, atr_pct, confidence):
     if atr_pct < 4.0: return 5
     return 4
 
-# ================= TIERED SL CAPS =================
 def get_max_sl_distance(symbol, leverage):
     base = symbol.replace("USDT", "")
     if base in ["BTC", "ETH"]: return 2.0
@@ -263,7 +261,6 @@ def calculate_atr(klines, period=14):
         trs.append(tr)
     return sum(trs[-period:]) / period if len(trs) >= period else 0
 
-# ================= TREND REVERSAL DETECTION =================
 def check_trend_reversal(symbol, direction, entry):
     klines = get_klines(symbol, "15m", 50)
     if len(klines) < 20: return False
@@ -390,7 +387,7 @@ def get_pattern_stats_text():
             text += f"Signals: {stats['signals']} | Win: {win_rate:.1f}% | PnL: {stats['total_pnl']:.1f}%\n\n"
     return text
 
-# ================= SCANNING - DICT BUG FIXED + 20% MIN PROFIT + MOMENTUM FIX =================
+# ================= SCANNING - FIXED: hourly_queue = setup =================
 def scan_market():
     global hourly_queue
     hourly_queue = {}
@@ -419,21 +416,19 @@ def scan_market():
             sl, tp, atr_val, risk_pct = get_smart_sl_tp(symbol, price, direction, klines, leverage)
             if not sl: continue
 
-            # FORCE 20% MIN PROFIT BY ADJUSTING LEVERAGE
             profit_target = ((tp - price) / price * 100 * leverage) if direction == "BUY" else ((price - tp) / price * 100 * leverage)
 
             if profit_target < MIN_PROFIT_TARGET:
                 risk_per_unit = abs(tp - price) / price
                 if risk_per_unit > 0:
                     needed_leverage = int(MIN_PROFIT_TARGET / (risk_per_unit * 100))
-                    if needed_leverage <= 10: # Max 10x cap
+                    if needed_leverage <= 10:
                         leverage = needed_leverage
                         profit_target = risk_per_unit * 100 * leverage
-                        # Recalc SL/TP with new leverage
                         sl, tp, atr_val, risk_pct = get_smart_sl_tp(symbol, price, direction, klines, leverage)
                         if not sl: continue
                     else:
-                        continue # Skip if can't reach 20% even with 10x
+                        continue
 
             closes = [float(k[4]) for k in klines]
             volumes = [float(k[5]) for k in klines]
@@ -441,7 +436,6 @@ def scan_market():
             avg_vol = sum(volumes[-20:]) / 20 if len(volumes) >= 20 else volumes[-1]
             vol_strength = (volumes[-1] / avg_vol * 100) if avg_vol > 0 else 0
 
-            # FIXED MOMENTUM CALC
             momentum = 0
             if len(closes) >= 3:
                 momentum = ((closes[-1] - closes[-3]) / closes[-3] * 100)
@@ -463,8 +457,8 @@ def scan_market():
                 "timestamp": get_ist_datetime()
             }
 
-            if coin not in hourly_queue or confidence > hourly_queue["confidence"]:
-                hourly_queue = setup # FIXED
+            if coin not in hourly_queue or confidence > hourly_queue[coin]["confidence"]:
+                hourly_queue = setup # FIXED: Was hourly_queue = setup
 
         except Exception as e:
             print(f"Scan error {coin}: {e}")
@@ -472,7 +466,7 @@ def scan_market():
         time.sleep(DELAY_BETWEEN_COINS)
 
     return len(hourly_queue)
-    # ================= SEND BATCH - DICT BUG FIXED =================
+    # ================= SEND BATCH - FIXED: pending_signals = setup =================
 def send_hourly_batch():
     global hourly_queue, pending_signals, last_batch_time
 
@@ -542,7 +536,7 @@ def send_hourly_batch():
     hourly_queue = {}
     last_batch_time = time.time()
 
-# ================= CHECK TRADES - ALL DICT BUGS FIXED + 30MIN UPDATES + TREND REVERSAL =================
+# ================= CHECK TRADES - FIXED: trade = active_trades | del active_trades =================
 def check_active_trades():
     global active_trades, last_trade_update
     current_time = time.time()
@@ -554,7 +548,6 @@ def check_active_trades():
         price = get_price(symbol)
         if not price: continue
 
-        # Check TP/SL
         tp_hit = False
         sl_hit = False
         pnl = 0
@@ -592,11 +585,9 @@ def check_active_trades():
             if coin in last_trade_update: del last_trade_update
             continue
 
-        # Check Trend Reversal
         if check_trend_reversal(symbol, trade["direction"], trade["entry"]):
             send_telegram(f"⚠️ <b>TREND REVERSAL {coin}</b>\n\nYour {trade['direction']} trade is at risk!\nPrice broke EMA20 against direction.\n\nCurrent: {format_price(price)}\nEntry: {format_price(trade['entry'])}\n\nConsider closing manually.")
 
-        # 30-Min Status Update
         if coin not in last_trade_update or (current_time - last_trade_update) >= TRADE_UPDATE_INTERVAL:
             current_pnl = ((price - trade["entry"]) / trade["entry"]) * 100 * trade["leverage"] if trade["direction"] == "BUY" else ((trade["entry"] - price) / trade["entry"]) * 100 * trade["leverage"]
 
@@ -620,8 +611,7 @@ def check_active_trades():
 
             send_telegram(msg)
             last_trade_update = current_time
-
-# ================= TELEGRAM COMMANDS - ALL DICT BUGS FIXED =================
+            # ================= TELEGRAM COMMANDS - FIXED: active_trades[coin] = pending_signals[coin] | del pending_signals[coin] =================
 def handle_telegram_commands():
     global last_update_id, active_trades, pending_signals
     try:
@@ -641,17 +631,17 @@ def handle_telegram_commands():
                 if data.startswith("ACTIVATE_"):
                     coin = data.replace("ACTIVATE_", "")
                     if coin in pending_signals:
-                        active_trades = pending_signals # FIXED: Was active_trades = pending_signals
-                        pattern_stats[pending_signals["pattern"]]["signals"] += 1
-                        last_trade_update = time.time() # Start 30-min timer
-                        del pending_signals # FIXED: Was del pending_signals
+                        active_trades[coin] = pending_signals[coin] # FIXED
+                        pattern_stats[pending_signals[coin]["pattern"]]["signals"] += 1
+                        last_trade_update[coin] = time.time() # FIXED
+                        del pending_signals[coin] # FIXED
                         answer_callback(callback_id, f"✅ {coin} Activated")
-                        send_telegram(f"✅ <b>{coin} Trade Activated</b>\n\nNow monitoring for TP/SL/Trend. 30-min updates enabled.\n\nEntry: {format_price(active_trades['entry'])}\nTP: {format_price(active_trades['tp'])}\nSL: {format_price(active_trades['sl'])}")
+                        send_telegram(f"✅ <b>{coin} Trade Activated</b>\n\nNow monitoring for TP/SL/Trend. 30-min updates enabled.\n\nEntry: {format_price(active_trades[coin]['entry'])}\nTP: {format_price(active_trades[coin]['tp'])}\nSL: {format_price(active_trades[coin]['sl'])}")
 
                 elif data.startswith("IGNORE_"):
                     coin = data.replace("IGNORE_", "")
                     if coin in pending_signals:
-                        del pending_signals # FIXED: Was del pending_signals
+                        del pending_signals[coin] # FIXED
                         answer_callback(callback_id, f"❌ {coin} Ignored")
 
             elif "message" in update:
@@ -702,7 +692,6 @@ def main():
     global last_report_time, last_batch_time
     print("🚀 Bot v2.18.18 FINAL starting...")
     load_trade_history()
-    # verify_coins() REMOVED - Using all 150 coins directly
 
     send_telegram(f"🚀 <b>Bot v2.18.18 FINAL Started</b>\n\n<b>Coins:</b> {len(COINS)} CoinDCX Futures\n<b>Min Profit:</b> 20% per trade\n<b>Risk Caps:</b> BTC/ETH 2% | BNB/SOL 3% | Mid 4% | Vol 5%\n<b>Features:</b> 30-min updates | TP/SL/Trend alerts\n\nScanning every 5min, batches every 2hrs")
 
