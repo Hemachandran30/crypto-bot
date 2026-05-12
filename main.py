@@ -1,5 +1,5 @@
-# ================= COINDCX + BINANCE VISION - PRODUCTION BOT v2.18.19 FINAL =================
-# ALL FIXES: Dict bugs | Strict CoinDCX verify | 20% min profit | Dynamic decimals | Tiered SL
+# ================= COINDCX + BINANCE VISION - PRODUCTION BOT v2.18.20 FINAL =================
+# ALL FIXES: Dict bugs | Correct CoinDCX verify | 20% min profit | Dynamic decimals | Tiered SL
 # LOGIC: Scan 24/7 every 5min | Send BEST 3 signals every 2hrs with FRESH prices + 20%+ profit
 # RISK: BTC/ETH=2% | BNB/SOL=3% | Mid=4% | Volatile=5% max SL | Min 20% profit target
 
@@ -131,22 +131,24 @@ def load_trade_history():
     except:
         print("No history file, starting fresh")
 
-# ================= COINDCX VERIFICATION - STRICT CHECK =================
+# ================= COINDCX VERIFICATION - CORRECTED =================
 def check_coindcx_exists(symbol):
     try:
-        pair = f"B-{symbol.replace('USDT','')}_USDT"
-        url = f"{COINDX_FUTURES_URL}?pair={pair}&interval=1m&limit=1"
+        url = "https://api.coindcx.com/exchange/v1/markets_details"
         res = requests.get(url, timeout=5)
         if res.status_code!= 200:
             return False
-        data = res.json()
-        if not isinstance(data, list) or len(data) == 0:
-            return False
-        candle = data[0]
-        if len(candle) < 6 or float(candle[4]) == 0:
-            return False
-        return True
-    except:
+
+        markets = res.json()
+        base = symbol.replace('USDT', '')
+        pair_name = f"B-{base}_USDT"
+
+        for market in markets:
+            if market.get('pair') == pair_name and market.get('status') == 'active':
+                return True
+        return False
+    except Exception as e:
+        print(f"Verify error {symbol}: {e}")
         return False
 
 def verify_coins():
@@ -155,13 +157,21 @@ def verify_coins():
     failed = []
     send_telegram(f"🔍 <b>Verifying CoinDCX Futures...</b>\n\nChecking {len(COINS_CANDIDATE)} coins...")
 
+    try:
+        url = "https://api.coindcx.com/exchange/v1/markets_details"
+        res = requests.get(url, timeout=10)
+        all_markets = res.json() if res.status_code == 200 else []
+        futures_pairs = {m['pair'] for m in all_markets if m.get('status') == 'active' and m.get('pair','').startswith('B-')}
+    except:
+        futures_pairs = set()
+
     for coin in COINS_CANDIDATE:
-        symbol = coin + "USDT"
-        if check_coindcx_exists(symbol):
+        pair_name = f"B-{coin}_USDT"
+        if pair_name in futures_pairs:
             verified.append(coin)
         else:
             failed.append(coin)
-        time.sleep(0.05)
+        time.sleep(0.01)
 
     COINS = verified
     msg = f"✅ <b>Verification Complete</b>\n\n<b>Scanning:</b> {len(verified)} coins\n<b>Removed:</b> {len(failed)} not on CoinDCX\n\n"
@@ -265,7 +275,7 @@ def calculate_atr(klines, period=14):
         tr = max(high - low, abs(high - prev_close), abs(low - prev_close))
         trs.append(tr)
     return sum(trs[-period:]) / period if len(trs) >= period else 0
-    # ================= PATTERN DETECTION =================
+  # ================= PATTERN DETECTION =================
 def detect_patterns(symbol, klines, price):
     if len(klines) < 50: return []
     closes = [float(k[4]) for k in klines]
@@ -381,7 +391,7 @@ def get_pattern_stats_text():
             text += f"<b>{pattern}</b>\n"
             text += f"Signals: {stats['signals']} | Win: {win_rate:.1f}% | PnL: {stats['total_pnl']:.1f}%\n\n"
     return text
-    # ================= SCANNING - 20% MIN PROFIT FILTER =================
+# ================= SCANNING - 20% MIN PROFIT FILTER =================
 def scan_market():
     global hourly_queue
     hourly_queue = {}
@@ -647,11 +657,11 @@ def send_hourly_report():
 
 def main():
     global last_report_time, last_batch_time
-    print("🚀 Bot v2.18.19 FINAL starting...")
+    print("🚀 Bot v2.18.20 FINAL starting...")
     load_trade_history()
     verify_coins()
 
-    send_telegram(f"🚀 <b>Bot v2.18.19 FINAL Started</b>\n\n<b>Coins:</b> {len(COINS)} verified on CoinDCX\n<b>Risk Caps:</b> BTC/ETH 2% | BNB/SOL 3% | Mid 4% | Vol 5%\n<b>Min Profit: 20%</b>\n<b>Max Risk:</b> 24%\n\nScanning every 5min, batches every 2hrs")
+    send_telegram(f"🚀 <b>Bot v2.18.20 FINAL Started</b>\n\n<b>Coins:</b> {len(COINS)} verified on CoinDCX\n<b>Risk Caps:</b> BTC/ETH 2% | BNB/SOL 3% | Mid 4% | Vol 5%\n<b>Min Profit: 20%</b>\n<b>Max Risk:</b> 24%\n\nScanning every 5min, batches every 2hrs")
 
     while True:
         try:
