@@ -28,7 +28,7 @@ COINS = [
     "ARB","VET","INJ","OP","ATOM","TIA","SUI","SEI","ALGO","EGLD",
     "FLOW","EOS","XTZ","AAVE","MKR","GRT","SNX","COMP","CRV","SUSHI",
     "LDO","CAKE","1INCH","DYDX","GMX","ENS","PENDLE","RNDR","FET","WLD",
-    "AR","THETA","LPT","AKT","SAND","MANA","AXS","GALA","CHZ","APE",
+    "AR","THETA","LPT","AKT","SAND","MANA","RIVER","AXS","GALA","CHZ","APE",
     "GMT","ENJ","PEPE","WIF","FLOKI","BONK","ORDI","BOME","NOT","DOGS",
     "CELO","BLUR","MASK","LUNC","ZRX","BAT","RUNE","STX","KAS","CRO",
     "IMX","MINA","CFX","STORJ","BAND","COTI","CHR","CTSI","LRC","API3",
@@ -104,7 +104,7 @@ def send_telegram(msg, coin=None, add_buttons=False):
                 ]]
             }
         res = requests.post(url, json=payload, timeout=TELEGRAM_TIMEOUT)
-        if res.status_code!= 200:
+        if res.status_code != 200:
             print(f"Telegram Error: {res.text}")
         return True
     except Exception as e:
@@ -167,7 +167,7 @@ def log_trade(coin, result, trade_data, pnl, exit_price):
             json.dump(logs, f, indent=2)
     except Exception as e:
         print(f"Log error: {e}")
-        # ================= DATA FETCHING =================
+       # ================= DATA FETCHING =================
 def get_price(symbol):
     try:
         res = requests.get(BINANCE_PRICE_URL, params={"symbol": symbol}, timeout=REQUEST_TIMEOUT)
@@ -331,7 +331,7 @@ def detect_patterns(symbol, klines, price):
 # ================= SMART SL/TP WITH TIERED CAPS =================
 def get_smart_sl_tp(symbol, entry, direction, klines, leverage):
     if len(klines) < 20:
-        return None, None, 0
+        return None, None, 0, 0
 
     closes = [float(k[4]) for k in klines]
     highs = [float(k[2]) for k in klines]
@@ -386,10 +386,10 @@ def get_pattern_stats_text():
             text += f"<b>{pattern}</b>\n"
             text += f"Signals: {stats['signals']} | Win: {win_rate:.1f}% | PnL: {stats['total_pnl']:.1f}%\n\n"
     return text
-    # ================= SCANNING - BUG 1, 2, 10 ACTUALLY FIXED =================
+# ================= SCANNING =================
 def scan_market():
     global hourly_queue
-    hourly_queue.clear() # CHANGED: was hourly_queue = {}
+    hourly_queue.clear() 
 
     for coin in COINS:
         symbol = coin + "USDT"
@@ -456,9 +456,8 @@ def scan_market():
                 "timestamp": get_ist_datetime()
             }
 
-            # CHANGED: was: if coin not in hourly_queue or confidence > hourly_queue["confidence"]:
             if coin not in hourly_queue or confidence > hourly_queue[coin]["confidence"]:
-                hourly_queue[coin] = setup # CHANGED: was: hourly_queue = setup
+                hourly_queue[coin] = setup 
 
         except Exception as e:
             print(f"Scan error {coin}: {e}")
@@ -467,7 +466,7 @@ def scan_market():
 
     return len(hourly_queue)
 
-# ================= SEND BATCH - BUG 3 ACTUALLY FIXED =================
+# ================= SEND BATCH =================
 def send_hourly_batch():
     global hourly_queue, pending_signals, last_batch_time
 
@@ -530,21 +529,22 @@ def send_hourly_batch():
 
         msg += f"\n<b>Active Trades:</b>\n{get_active_trades_text()}"
 
-        pending_signals[coin] = setup # CHANGED: was: pending_signals = setup
+        pending_signals[coin] = setup 
         send_telegram(msg, coin=coin, add_buttons=True)
         time.sleep(1)
 
-    hourly_queue.clear() # CHANGED: was: hourly_queue = {}
+    hourly_queue.clear() 
     last_batch_time = time.time()
-    # ================= CHECK TRADES - BUG 4, 5, 6, 7, 8 ACTUALLY FIXED =================
+
+# ================= CHECK TRADES =================
 def check_active_trades():
     global active_trades, last_trade_update
     current_time = time.time()
 
     for coin in list(active_trades.keys()):
-        trade = active_trades.get(coin) # CHANGED: was: trade = active_trades
+        trade = active_trades.get(coin) 
         
-        if not isinstance(trade, dict): # ADDED: Safety check BUG 11
+        if not isinstance(trade, dict): 
             print(f"Invalid trade structure for {coin}")
             continue
 
@@ -577,8 +577,8 @@ def check_active_trades():
             pattern_stats[trade["pattern"]]["total_pnl"] += pnl
             log_trade(coin, "TP_HIT", trade, pnl, price)
             send_telegram(f"✅ <b>TP HIT {coin}</b>\n\nPnL: +{pnl:.2f}%\nPattern: {trade['pattern']}\nEntry: {format_price(trade['entry'])}\nExit: {format_price(trade['tp'])}\nTime: {get_ist_time()}")
-            del active_trades[coin] # CHANGED: was: del active_trades
-            if coin in last_trade_update: del last_trade_update[coin] # CHANGED: was: del last_trade_update
+            del active_trades[coin] 
+            if coin in last_trade_update: del last_trade_update[coin] 
             continue
 
         if sl_hit:
@@ -586,14 +586,14 @@ def check_active_trades():
             pattern_stats[trade["pattern"]]["total_pnl"] += pnl
             log_trade(coin, "SL_HIT", trade, pnl, price)
             send_telegram(f"🛑 <b>SL HIT {coin}</b>\n\nPnL: {pnl:.2f}%\nPattern: {trade['pattern']}\nEntry: {format_price(trade['entry'])}\nExit: {format_price(trade['sl'])}\nTime: {get_ist_time()}")
-            del active_trades[coin] # CHANGED: was: del active_trades
-            if coin in last_trade_update: del last_trade_update[coin] # CHANGED: was: del last_trade_update
+            del active_trades[coin] 
+            if coin in last_trade_update: del last_trade_update[coin] 
             continue
 
         if check_trend_reversal(symbol, trade["direction"], trade["entry"]):
             send_telegram(f"⚠️ <b>TREND REVERSAL {coin}</b>\n\nYour {trade['direction']} trade is at risk!\nPrice broke EMA20 against direction.\n\nCurrent: {format_price(price)}\nEntry: {format_price(trade['entry'])}\n\nConsider closing manually.")
 
-        if coin not in last_trade_update or (current_time - last_trade_update[coin]) >= TRADE_UPDATE_INTERVAL: # CHANGED: was: (current_time - last_trade_update)
+        if coin not in last_trade_update or (current_time - last_trade_update[coin]) >= TRADE_UPDATE_INTERVAL: 
             current_pnl = ((price - trade["entry"]) / trade["entry"]) * 100 * trade["leverage"] if trade["direction"] == "BUY" else ((trade["entry"] - price) / trade["entry"]) * 100 * trade["leverage"]
 
             tp_distance = ((trade["tp"] - price) / price * 100) if trade["direction"] == "BUY" else ((price - trade["tp"]) / price * 100)
@@ -615,13 +615,9 @@ def check_active_trades():
             msg += f"Next update in 30 mins"
 
             send_telegram(msg)
-            last_trade_update
-            msg += f"Next update in 30 mins"
+            last_trade_update[coin] = current_time 
 
-            send_telegram(msg)
-            last_trade_update = current_time # CHANGED: was: last_trade_update = current_time
-
-# ================= TELEGRAM COMMANDS - BUG 11 SAFE ACCESS =================
+# ================= TELEGRAM COMMANDS =================
 def handle_telegram_commands():
     global last_update_id, active_trades, pending_signals
     try:
@@ -641,22 +637,22 @@ def handle_telegram_commands():
                 if data.startswith("ACTIVATE_"):
                     coin = data.replace("ACTIVATE_", "")
                     if coin in pending_signals:
-                        trade_data = pending_signals.get(coin) # BUG 11 FIX: Safe .get()
-                        if not isinstance(trade_data, dict): # BUG 11 FIX: Type check
+                        trade_data = pending_signals.get(coin) 
+                        if not isinstance(trade_data, dict): 
                             answer_callback(callback_id, "Invalid signal data")
                             continue
 
-                        active_trades = trade_data # CHANGED: was: active_trades = trade_data
+                        active_trades[coin] = trade_data 
                         pattern_stats[trade_data["pattern"]]["signals"] += 1
-                        last_trade_update = time.time() # CHANGED: was: last_trade_update = time.time()
-                        del pending_signals # CHANGED: was: del pending_signals
+                        last_trade_update[coin] = time.time() 
+                        del pending_signals[coin] 
                         answer_callback(callback_id, f"✅ {coin} Activated")
-                        send_telegram(f"✅ <b>{coin} Trade Activated</b>\n\nNow monitoring for TP/SL/Trend. 30-min updates enabled.\n\nEntry: {format_price(active_trades['entry'])}\nTP: {format_price(active_trades['tp'])}\nSL: {format_price(active_trades['sl'])}")
+                        send_telegram(f"✅ <b>{coin} Trade Activated</b>\n\nNow monitoring for TP/SL/Trend. 30-min updates enabled.\n\nEntry: {format_price(active_trades[coin]['entry'])}\nTP: {format_price(active_trades[coin]['tp'])}\nSL: {format_price(active_trades[coin]['sl'])}")
 
                 elif data.startswith("IGNORE_"):
                     coin = data.replace("IGNORE_", "")
                     if coin in pending_signals:
-                        del pending_signals # CHANGED: was: del pending_signals
+                        del pending_signals[coin] 
                         answer_callback(callback_id, f"❌ {coin} Ignored")
 
             elif "message" in update:
@@ -694,7 +690,6 @@ def send_hourly_report():
         check_active_trades()
         handle_telegram_commands()
 
-        # BUG 9 FIX: Safe len() to prevent crash
         pending_count = len(pending_signals.keys()) if isinstance(pending_signals, dict) else 0
 
         report = f"📊 <b>Hourly Report {get_ist_time()}</b>\n\n"
