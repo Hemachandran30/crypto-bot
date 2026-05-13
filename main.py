@@ -680,7 +680,16 @@ def handle_telegram_commands():
                     send_telegram(help_text)
 
     except Exception as e:
-        print(f"Telegram command error: {e}")
+        pass # Ignore minor polling connection errors
+
+def poll_telegram_commands():
+    """ Runs constantly in the background to catch button clicks instantly """
+    while True:
+        try:
+            handle_telegram_commands()
+        except Exception as e:
+            print(f"Polling error: {e}")
+        time.sleep(2) # Checks every 2 seconds
 
 def send_hourly_report():
     global last_hourly_time
@@ -688,8 +697,7 @@ def send_hourly_report():
     if (now.timestamp() - last_hourly_time) >= 3600:
         scan_market()
         check_active_trades()
-        handle_telegram_commands()
-
+        
         pending_count = len(pending_signals.keys()) if isinstance(pending_signals, dict) else 0
 
         report = f"📊 <b>Hourly Report {get_ist_time()}</b>\n\n"
@@ -706,20 +714,24 @@ def main():
     print("🚀 Bot v2.18.18 FINAL starting...")
     load_trade_history()
 
+    # START THE BACKGROUND THREAD TO LISTEN FOR BUTTON CLICKS INSTANTLY
+    polling_thread = threading.Thread(target=poll_telegram_commands, daemon=True)
+    polling_thread.start()
+
     send_telegram(f"🚀 <b>Bot v2.18.18 FINAL Started</b>\n\n<b>Coins:</b> {len(COINS)} CoinDCX Futures\n<b>Min Profit:</b> 20% per trade\n<b>Risk Caps:</b> BTC/ETH 2% | BNB/SOL 3% | Mid 4% | Vol 5%\n<b>Features:</b> 30-min updates | TP/SL/Trend alerts\n\nScanning every 5min, batches every 2hrs")
 
     while True:
         try:
             scan_market()
             check_active_trades()
-            handle_telegram_commands()
+            # Removed handle_telegram_commands() from here so it doesn't block
             send_hourly_report()
 
             if (time.time() - last_batch_time) >= BATCH_INTERVAL:
                 send_hourly_batch()
 
             save_trade_history()
-            time.sleep(SCAN_INTERVAL)
+            time.sleep(SCAN_INTERVAL) # The bot can safely sleep here now without ignoring your buttons
 
         except Exception as e:
             print(f"Main loop error: {e}")
