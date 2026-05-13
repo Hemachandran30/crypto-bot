@@ -111,7 +111,7 @@ def get_news_headlines(coin):
         res = requests.get("https://cryptopanic.com/api/v1/posts/", params={"auth_token": NEWS_API_KEY, "currencies": coin, "kind": "news"}, timeout=5)
         return [p["title"] for p in res.json().get("results", [])[:3]]
     except: return []
-  # ================= THE 15 PATTERNS =================
+# ================= THE 15 PATTERNS =================
 def detect_patterns(symbol, klines, price):
     if len(klines) < 50: return []
     closes = [float(k[4]) for k in klines]
@@ -212,7 +212,7 @@ def send_river_signal():
             setup = {"symbol":"RIVERUSDT","coin":"RIVER","direction":best[2],"pattern":best[0],"setup_score":best[1]}
             format_and_send(setup, "RIVER", is_river=True)
     last_river_time = time.time()
-  # ================= TRACKING & LOOP =================
+ # ================= TRACKING & LOOP =================
 def check_active_trades():
     global active_trades
     for c, t in list(active_trades.items()):
