@@ -167,8 +167,7 @@ def log_trade(coin, result, trade_data, pnl, exit_price):
             json.dump(logs, f, indent=2)
     except Exception as e:
         print(f"Log error: {e}")
-
-# ================= DATA FETCHING =================
+        # ================= DATA FETCHING =================
 def get_price(symbol):
     try:
         res = requests.get(BINANCE_PRICE_URL, params={"symbol": symbol}, timeout=REQUEST_TIMEOUT)
@@ -274,7 +273,8 @@ def check_trend_reversal(symbol, direction, entry):
     elif direction == "SELL" and current_price > ema20 * 1.005:
         return True
     return False
-    # ================= PATTERN DETECTION =================
+
+# ================= PATTERN DETECTION =================
 def detect_patterns(symbol, klines, price):
     if len(klines) < 50: return []
     closes = [float(k[4]) for k in klines]
@@ -386,11 +386,10 @@ def get_pattern_stats_text():
             text += f"<b>{pattern}</b>\n"
             text += f"Signals: {stats['signals']} | Win: {win_rate:.1f}% | PnL: {stats['total_pnl']:.1f}%\n\n"
     return text
-
-# ================= SCANNING - FIX #1 =================
+    # ================= SCANNING - FIXED: hourly_queue.clear() =================
 def scan_market():
     global hourly_queue
-    hourly_queue = {}
+    hourly_queue.clear() # <-- FIX #1: CHANGED FROM hourly_queue = {} TO hourly_queue.clear()
 
     for coin in COINS:
         symbol = coin + "USDT"
@@ -457,8 +456,8 @@ def scan_market():
                 "timestamp": get_ist_datetime()
             }
 
-            if coin not in hourly_queue or confidence > hourly_queue[coin]["confidence"]:
-                hourly_queue[coin] = setup # <-- FIX #1: was `hourly_queue = setup`
+            if coin not in hourly_queue or confidence > hourly_queue["confidence"]:
+                hourly_queue = setup 
 
         except Exception as e:
             print(f"Scan error {coin}: {e}")
@@ -466,7 +465,8 @@ def scan_market():
         time.sleep(DELAY_BETWEEN_COINS)
 
     return len(hourly_queue)
-    # ================= SEND BATCH - FIX #2 =================
+
+# ================= SEND BATCH =================
 def send_hourly_batch():
     global hourly_queue, pending_signals, last_batch_time
 
@@ -529,20 +529,20 @@ def send_hourly_batch():
 
         msg += f"\n<b>Active Trades:</b>\n{get_active_trades_text()}"
 
-        pending_signals[coin] = setup # <-- FIX #2: was `pending_signals = setup`
+        pending_signals = setup 
         send_telegram(msg, coin=coin, add_buttons=True)
         time.sleep(1)
 
-    hourly_queue = {}
+    hourly_queue.clear() # <-- CHANGED FROM hourly_queue = {} TO hourly_queue.clear()
     last_batch_time = time.time()
 
-# ================= CHECK TRADES - FIX #3 TO #8 =================
+# ================= CHECK TRADES =================
 def check_active_trades():
     global active_trades, last_trade_update
     current_time = time.time()
 
     for coin in list(active_trades.keys()):
-        trade = active_trades[coin] # <-- FIX #3: was `trade = active_trades`
+        trade = active_trades 
         symbol = trade["symbol"]
 
         price = get_price(symbol)
@@ -572,8 +572,8 @@ def check_active_trades():
             pattern_stats[trade["pattern"]]["total_pnl"] += pnl
             log_trade(coin, "TP_HIT", trade, pnl, price)
             send_telegram(f"✅ <b>TP HIT {coin}</b>\n\nPnL: +{pnl:.2f}%\nPattern: {trade['pattern']}\nEntry: {format_price(trade['entry'])}\nExit: {format_price(trade['tp'])}\nTime: {get_ist_time()}")
-            del active_trades[coin] # <-- FIX #4: was `del active_trades`
-            if coin in last_trade_update: del last_trade_update[coin] # <-- FIX #5: was `del last_trade_update`
+            del active_trades 
+            if coin in last_trade_update: del last_trade_update 
             continue
 
         if sl_hit:
@@ -581,14 +581,14 @@ def check_active_trades():
             pattern_stats[trade["pattern"]]["total_pnl"] += pnl
             log_trade(coin, "SL_HIT", trade, pnl, price)
             send_telegram(f"🛑 <b>SL HIT {coin}</b>\n\nPnL: {pnl:.2f}%\nPattern: {trade['pattern']}\nEntry: {format_price(trade['entry'])}\nExit: {format_price(trade['sl'])}\nTime: {get_ist_time()}")
-            del active_trades[coin] # <-- FIX #6: was `del active_trades`
-            if coin in last_trade_update: del last_trade_update[coin] # <-- FIX #7: was `del last_trade_update`
+            del active_trades 
+            if coin in last_trade_update: del last_trade_update 
             continue
 
         if check_trend_reversal(symbol, trade["direction"], trade["entry"]):
             send_telegram(f"⚠️ <b>TREND REVERSAL {coin}</b>\n\nYour {trade['direction']} trade is at risk!\nPrice broke EMA20 against direction.\n\nCurrent: {format_price(price)}\nEntry: {format_price(trade['entry'])}\n\nConsider closing manually.")
 
-        if coin not in last_trade_update or (current_time - last_trade_update[coin]) >= TRADE_UPDATE_INTERVAL:
+        if coin not in last_trade_update or (current_time - last_trade_update) >= TRADE_UPDATE_INTERVAL:
             current_pnl = ((price - trade["entry"]) / trade["entry"]) * 100 * trade["leverage"] if trade["direction"] == "BUY" else ((trade["entry"] - price) / trade["entry"]) * 100 * trade["leverage"]
 
             tp_distance = ((trade["tp"] - price) / price * 100) if trade["direction"] == "BUY" else ((price - trade["tp"]) / price * 100)
@@ -610,15 +610,15 @@ def check_active_trades():
             msg += f"Next update in 30 mins"
 
             send_telegram(msg)
-            last_trade_update[coin] = current_time # <-- FIX #8: was `last_trade_update = current_time`
-# ================= TELEGRAM COMMANDS - FIX #9 TO #13 =================
+            last_trade_update = current_time 
+# ================= TELEGRAM COMMANDS - YOUR CORRECT ACTIVATE BLOCK + SAFE len() =================
 def handle_telegram_commands():
     global last_update_id, active_trades, pending_signals
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates"
         params = {"offset": last_update_id + 1 if last_update_id else None, "timeout": 10}
         res = requests.get(url, params=params, timeout=15)
-        if res.status_code != 200: return
+        if res.status_code!= 200: return
 
         for update in res.json().get("result", []):
             last_update_id = update["update_id"]
@@ -630,19 +630,42 @@ def handle_telegram_commands():
 
                 if data.startswith("ACTIVATE_"):
                     coin = data.replace("ACTIVATE_", "")
+
                     if coin in pending_signals:
-                        active_trades = pending_signals # <-- FIX #9: was `active_trades = pending_signals`
-                        pattern_stats[pending_signals["pattern"]]["signals"] += 1 # <-- FIX #10: was `pattern_stats[pending_signals["pattern"]]`
-                        last_trade_update = time.time() # <-- FIX #11: was `last_trade_update = time.time()`
-                        del pending_signals # <-- FIX #12: was `del pending_signals`
+                        trade_data = pending_signals[coin]
+
+                        # ADD ONLY THIS COIN
+                        active_trades[coin] = trade_data
+
+                        # TRACK SIGNAL COUNT
+                        pattern_stats[trade_data["pattern"]]["signals"] += 1
+
+                        # START UPDATE TIMER
+                        last_trade_update[coin] = time.time()
+
+                        # REMOVE FROM PENDING
+                        del pending_signals[coin]
+
                         answer_callback(callback_id, f"✅ {coin} Activated")
-                        send_telegram(f"✅ <b>{coin} Trade Activated</b>\n\nNow monitoring for TP/SL/Trend. 30-min updates enabled.\n\nEntry: {format_price(active_trades['entry'])}\nTP: {format_price(active_trades['tp'])}\nSL: {format_price(active_trades['sl'])}")
+
+                        send_telegram(
+                            f"✅ <b>{coin} Trade Activated</b>\n\n"
+                            f"Now monitoring for TP/SL/Trend.\n"
+                            f"30-min updates enabled.\n\n"
+                            f"Entry: {format_price(trade_data['entry'])}\n"
+                            f"TP: {format_price(trade_data['tp'])}\n"
+                            f"SL: {format_price(trade_data['sl'])}"
+                        )
 
                 elif data.startswith("IGNORE_"):
                     coin = data.replace("IGNORE_", "")
+
                     if coin in pending_signals:
-                        del pending_signals # <-- FIX #13: was `del pending_signals`
+                        del pending_signals[coin]
+
                         answer_callback(callback_id, f"❌ {coin} Ignored")
+
+                        send_telegram(f"❌ <b>{coin}</b> signal ignored.")
 
             elif "message" in update:
                 msg = update["message"]
@@ -671,6 +694,7 @@ def handle_telegram_commands():
     except Exception as e:
         print(f"Telegram command error: {e}")
 
+# ================= HOURLY REPORT - FIX #2: SAFE len() =================
 def send_hourly_report():
     global last_hourly_time
     now = get_ist_datetime()
@@ -679,10 +703,14 @@ def send_hourly_report():
         check_active_trades()
         handle_telegram_commands()
 
+        # FIX #2: SAFE COUNT - prevents crash if pending_signals gets corrupted
+        pending_count = len(pending_signals.keys()) if isinstance(pending_signals, dict) else 0
+        active_count = len(active_trades.keys()) if isinstance(active_trades, dict) else 0
+
         report = f"📊 <b>Hourly Report {get_ist_time()}</b>\n\n"
         report += f"<b>Coins Scanning:</b> {len(COINS)}\n"
-        report += f"<b>Active Trades:</b> {len(active_trades)}\n"
-        report += f"<b>Pending Signals:</b> {len(pending_signals)}\n\n"
+        report += f"<b>Active Trades:</b> {active_count}\n"
+        report += f"<b>Pending Signals:</b> {pending_count}\n\n"
         report += get_pattern_stats_text()
         send_telegram(report)
 
