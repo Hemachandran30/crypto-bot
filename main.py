@@ -616,7 +616,7 @@ def check_active_trades():
 
             send_telegram(msg)
             last_trade_update
-                        msg += f"Next update in 30 mins"
+            msg += f"Next update in 30 mins"
 
             send_telegram(msg)
             last_trade_update = current_time # CHANGED: was: last_trade_update = current_time
