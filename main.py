@@ -456,8 +456,8 @@ def scan_market():
                 "timestamp": get_ist_datetime()
             }
 
-            if coin not in hourly_queue or confidence > hourly_queue["confidence"]:
-                hourly_queue = setup 
+            if coin not in hourly_queue or confidence > hourly_queue[coin]["confidence"]:
+                hourly_queue[coin] = setup 
 
         except Exception as e:
             print(f"Scan error {coin}: {e}")
@@ -529,7 +529,7 @@ def send_hourly_batch():
 
         msg += f"\n<b>Active Trades:</b>\n{get_active_trades_text()}"
 
-        pending_signals = setup 
+        pending_signals[coin] = setup 
         send_telegram(msg, coin=coin, add_buttons=True)
         time.sleep(1)
 
@@ -542,7 +542,7 @@ def check_active_trades():
     current_time = time.time()
 
     for coin in list(active_trades.keys()):
-        trade = active_trades 
+        trade = active_trades[coin] 
         symbol = trade["symbol"]
 
         price = get_price(symbol)
@@ -572,8 +572,8 @@ def check_active_trades():
             pattern_stats[trade["pattern"]]["total_pnl"] += pnl
             log_trade(coin, "TP_HIT", trade, pnl, price)
             send_telegram(f"✅ <b>TP HIT {coin}</b>\n\nPnL: +{pnl:.2f}%\nPattern: {trade['pattern']}\nEntry: {format_price(trade['entry'])}\nExit: {format_price(trade['tp'])}\nTime: {get_ist_time()}")
-            del active_trades 
-            if coin in last_trade_update: del last_trade_update 
+            del active_trades[coin] 
+            if coin in last_trade_update: del last_trade_update[coin] 
             continue
 
         if sl_hit:
@@ -581,14 +581,14 @@ def check_active_trades():
             pattern_stats[trade["pattern"]]["total_pnl"] += pnl
             log_trade(coin, "SL_HIT", trade, pnl, price)
             send_telegram(f"🛑 <b>SL HIT {coin}</b>\n\nPnL: {pnl:.2f}%\nPattern: {trade['pattern']}\nEntry: {format_price(trade['entry'])}\nExit: {format_price(trade['sl'])}\nTime: {get_ist_time()}")
-            del active_trades 
-            if coin in last_trade_update: del last_trade_update 
+            del active_trades[coin] 
+            if coin in last_trade_update: del last_trade_update[coin] 
             continue
 
         if check_trend_reversal(symbol, trade["direction"], trade["entry"]):
             send_telegram(f"⚠️ <b>TREND REVERSAL {coin}</b>\n\nYour {trade['direction']} trade is at risk!\nPrice broke EMA20 against direction.\n\nCurrent: {format_price(price)}\nEntry: {format_price(trade['entry'])}\n\nConsider closing manually.")
 
-        if coin not in last_trade_update or (current_time - last_trade_update) >= TRADE_UPDATE_INTERVAL:
+        if coin not in last_trade_update or (current_time - last_trade_update[coin]) >= TRADE_UPDATE_INTERVAL:
             current_pnl = ((price - trade["entry"]) / trade["entry"]) * 100 * trade["leverage"] if trade["direction"] == "BUY" else ((trade["entry"] - price) / trade["entry"]) * 100 * trade["leverage"]
 
             tp_distance = ((trade["tp"] - price) / price * 100) if trade["direction"] == "BUY" else ((price - trade["tp"]) / price * 100)
@@ -610,7 +610,7 @@ def check_active_trades():
             msg += f"Next update in 30 mins"
 
             send_telegram(msg)
-            last_trade_update = current_time 
+            last_trade_update[coin] = current_time 
 # ================= TELEGRAM COMMANDS - YOUR CORRECT ACTIVATE BLOCK + SAFE len() =================
 def handle_telegram_commands():
     global last_update_id, active_trades, pending_signals
