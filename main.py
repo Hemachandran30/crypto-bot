@@ -41,18 +41,19 @@ pattern_stats = {p: {"signals":0,"wins":0,"losses":0,"total_pnl":0} for p in [
 ]}
 
 last_update_id = None
-last_batch_time = time.time()
-last_river_time = time.time()
+last_batch_time = 0
+last_river_time = 0
 last_hourly_time = time.time()
+last_pnl_update_time = time.time()
 
 SCAN_INTERVAL = 300
-BATCH_INTERVAL = 7200
-RIVER_INTERVAL = 1800 
-MIN_SETUP_SCORE = 88 
+BATCH_INTERVAL = 1800         
+RIVER_INTERVAL = 900          
+MIN_SETUP_SCORE = 94          
 MIN_PROFIT_TARGET = 20.0
 DELAY_BETWEEN_COINS = 0.15
 MAX_PRICE_DRIFT = 0.02
-MAX_SIGNALS_PER_BATCH = 3
+MAX_SIGNALS_PER_BATCH = 1     
 
 # ================= PERSISTENCE =================
 def save_active_trades():
@@ -176,13 +177,32 @@ def detect_patterns(symbol, klines, price, btc_trend):
     rsi = calculate_rsi(closes)
     ema20 = calculate_ema(closes, 20)
     ema50 = calculate_ema(closes, 50)
+    
+    # LOW QUALITY SIDEWAYS MARKET SIGNALS FIX
+    market_range = ((max(highs[-20:]) - min(lows[-20:])) / price) * 100
+    if market_range < 1.8:
+        return []
+
     p = []
 
-    if ema20 and price > ema20 and price > max(highs[-5:-1]) and btc_trend == 1:
-        p.append(("Bull Flag Break", 92, "BUY"))
+    # FAKE BREAKOUT SIGNALS FIX (Multi-candle Flags)
+    if (
+        ema20 and
+        closes[-1] > highs[-2] and
+        closes[-2] > highs[-3] and
+        price > ema20 and
+        btc_trend == 1
+    ):
+        p.append(("Bull Flag Break", 94, "BUY"))
 
-    if ema20 and price < ema20 and price < min(lows[-5:-1]) and btc_trend == -1:
-        p.append(("Bear Flag Break", 92, "SELL"))
+    if (
+        ema20 and
+        closes[-1] < lows[-2] and
+        closes[-2] < lows[-3] and
+        price < ema20 and
+        btc_trend == -1
+    ):
+        p.append(("Bear Flag Break", 94, "SELL"))
 
     if (closes[-1] > max(highs[-20:-1]) and vols[-1] > avg_v * 1.5):
         if btc_trend == 1: p.append(("Breakout", 88, "BUY"))
@@ -217,11 +237,21 @@ def detect_patterns(symbol, klines, price, btc_trend):
     if price > res and vols[-1] > avg_v * 2.5 and btc_trend == 1: p.append(("Volume Breakout", 91, "BUY"))
 
     return p
-   # ================= VERIFICATION & SENDING =================
+# ================= VERIFICATION & SENDING =================
 def format_and_send(setup, coin, is_river=False):
     global pending_signals, sent_coins, hourly_queue
-    p, k = get_price(setup["symbol"]), get_klines(setup["symbol"], "15m")
-    if not p or not k: return False
+    
+    live_price = get_price(setup["symbol"])
+    p = setup.get("scan_price", live_price)
+    k = get_klines(setup["symbol"], "15m")
+
+    if not live_price or not k:
+        return False
+
+    drift = abs(live_price - p) / p
+
+    if drift > MAX_PRICE_DRIFT:
+        return False
     
     closes = [float(x[4]) for x in k]
     atr = calculate_atr(k)
@@ -259,14 +289,14 @@ def format_and_send(setup, coin, is_river=False):
     mom = (closes[-1] - closes[-3])/closes[-3]*100
     news = get_news_headlines(coin)
 
-    header = "🌊 <b>RIVER SIGNAL (1-HR)</b>" if is_river else f"🔥 <b>VERIFIED SETUP {coin}</b>"
+    header = "🌊 <b>RIVER SIGNAL</b>" if is_river else f"🔥 <b>VERIFIED SETUP {coin}</b>"
     msg = f"{header} | Score: {int(setup['setup_score'])}/100\n\n"
     msg += f"📢 Direction: {setup['direction']} | Leverage: {lev}x\n"
     msg += f"💰 Entry: {format_price(p)}\n🎯 TP: {format_price(tp)}\n🛑 SL: {format_price(sl)}\n\n"
     msg += f"📈 Profit Target: {profit_target:.2f}%\n"
     msg += f"📌 Pattern: {setup['pattern']} | RSI: {calculate_rsi(closes):.2f}\n"
     msg += f"⚡ Momentum: {mom:.2f}% | 🚀 Velocity: {abs(mom/45):.4f}/min\n"
-    msg += f"⏳ ETA: ~{eta} mins | ⏰ Expires: 1hr\n"
+    msg += f"⏳ ETA: ~{eta} mins | ⏰ Expires: 30mins\n"
     msg += f"✏️ ATR: {format_price(atr)}\n\n"
     if news: msg += "<b>📰 News:</b>\n" + "\n".join([f"• {n[:60]}..." for n in news]) + "\n\n"
     msg += f"⏰ Verified At: {get_ist_time()}"
@@ -287,11 +317,8 @@ def format_and_send(setup, coin, is_river=False):
         }
     }
     
-    if requests.post(url, json=payload, timeout=30).status_code == 200:
+    if requests.post(url, json=payload, timeout=15).status_code == 200:
         sent_coins.append(setup["coin"])
-        for c in sent_coins:
-            if c in hourly_queue:
-                del hourly_queue[c]
         return True
     return False
 
@@ -304,10 +331,14 @@ def send_hourly_batch():
         if s["coin"] == "RIVER": continue
         if sent_count >= MAX_SIGNALS_PER_BATCH: break
         if format_and_send(s, s["coin"]): sent_count += 1
+        
+    for s in sorted_q:
+        if s["coin"] in hourly_queue:
+            del hourly_queue[s["coin"]]
+
     sent_coins = []
-    hourly_queue.clear()
     last_batch_time = time.time()
- # ================= TRACKING, COMMANDS & MAIN LOOP =================
+# ================= TRACKING, COMMANDS & MAIN LOOP =================
 def check_active_trades():
     global active_trades
     for c, t in list(active_trades.items()):
@@ -318,7 +349,7 @@ def check_active_trades():
             cl = [float(x[4]) for x in get_klines(t["symbol"], "15m", 20)]
             ema20 = calculate_ema(cl, 20)
             if ema20 and ((t["direction"] == "BUY" and p < ema20 * 0.995) or (t["direction"] == "SELL" and p > ema20 * 1.005)):
-                requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": f"⚠️ <b>TREND REVERSAL {c}</b>\nPrice broke EMA20.", "parse_mode": "HTML"})
+                requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": f"⚠️ <b>TREND REVERSAL {c}</b>\nPrice broke EMA20.", "parse_mode": "HTML"}, timeout=15)
                 active_trades[c]["reversal_alerted"] = True
                 save_active_trades()
 
@@ -329,7 +360,8 @@ def check_active_trades():
                 json={
                     "chat_id": CHAT_ID,
                     "text": f"🟡 BREAK-EVEN ALERT {c}\n\nTrade reached +10% profit.\nConsider moving SL to entry.\n\nCurrent PnL: {current_pnl:.2f}%"
-                }
+                },
+                timeout=15
             )
             active_trades[c]["breakeven_sent"] = True
             save_active_trades()
@@ -344,17 +376,25 @@ def check_active_trades():
             
         if hit:
             with trade_lock:
-                # UPDATED STATS LOGIC
                 primary_pattern = t["pattern"].split(" + ")[0]
+
+                pnl_result = (
+                    ((p - t["entry"]) / t["entry"]) * 100 * t["leverage"]
+                    if t["direction"] == "BUY"
+                    else
+                    ((t["entry"] - p) / t["entry"]) * 100 * t["leverage"]
+                )
 
                 if primary_pattern in pattern_stats:
                     pattern_stats[primary_pattern]["signals"] += 1
+                    pattern_stats[primary_pattern]["total_pnl"] += pnl_result
+
                     if hit == "WIN":
                         pattern_stats[primary_pattern]["wins"] += 1
                     else:
                         pattern_stats[primary_pattern]["losses"] += 1
             
-            requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": f"{'✅' if hit=='WIN' else '🛑'} Trade Closed: {c} ({hit})"})
+            requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": f"{'✅' if hit=='WIN' else '🛑'} Trade Closed: {c} ({hit})"}, timeout=15)
             del active_trades[c]
             save_active_trades()
             save_trade_history()
@@ -376,40 +416,97 @@ def poll_telegram():
                     cb = u["callback_query"]
                     data = cb["data"]; c = data.split("_")[1]
                     
-                    requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/answerCallbackQuery", json={"callback_query_id": cb["id"], "text": "Processing..."})
+                    requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/answerCallbackQuery", json={"callback_query_id": cb["id"], "text": "Processing..."}, timeout=15)
                     
                     if "ACTIVATE" in data and c in pending_signals:
                         with trade_lock:
                             pending_signals[c]["breakeven_sent"] = False
                             active_trades[c] = pending_signals[c]
                         save_active_trades()
-                        requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": f"🚀 {c} Activated!"})
+                        requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": f"🚀 {c} Activated!"}, timeout=15)
                         del pending_signals[c]
                     elif "IGNORE" in data and c in pending_signals:
-                        requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": f"❌ {c} Ignored"})
+                        requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": f"❌ {c} Ignored"}, timeout=15)
                         del pending_signals[c]
                         
                 elif "message" in u:
                     text = u["message"].get("text", "").lower()
                     if text == "/stats":
-                        requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": get_pattern_stats_text(), "parse_mode": "HTML"})
+                        requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": get_pattern_stats_text(), "parse_mode": "HTML"}, timeout=15)
                     elif text == "/trades":
-                        requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": get_active_trades_text(), "parse_mode": "HTML"})
+                        requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": get_active_trades_text(), "parse_mode": "HTML"}, timeout=15)
         except: pass
         time.sleep(2)
 
 def send_hourly_report():
-    global last_hourly_time
-    now = time.time()
-    if (now - last_hourly_time) >= 3600:
-        report = f"📊 <b>Hourly Report {get_ist_time()}</b>\n\nActive: {len(active_trades)} | Pending: {len(pending_signals)}\n" + get_pattern_stats_text()
-        requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": report, "parse_mode": "HTML"})
-        last_hourly_time = now
+    report = f"📊 <b>Hourly Report {get_ist_time()}</b>\n\nActive: {len(active_trades)} | Pending: {len(pending_signals)}\n" + get_pattern_stats_text()
+    requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": report, "parse_mode": "HTML"}, timeout=15)
+
+def send_live_pnl_update():
+    if not active_trades:
+        return
+
+    total_pnl = 0
+    wins = 0
+    losses = 0
+
+    msg = f"⏰ LIVE PnL UPDATE - {get_ist_time()}\n\n"
+
+    for coin, trade in active_trades.items():
+        p = get_price(trade["symbol"])
+        if not p:
+            continue
+
+        pnl = (
+            ((p - trade["entry"]) / trade["entry"]) * 100 * trade["leverage"]
+            if trade["direction"] == "BUY"
+            else
+            ((trade["entry"] - p) / trade["entry"]) * 100 * trade["leverage"]
+        )
+
+        total_pnl += pnl
+
+        if pnl >= 3:
+            wins += 1
+        elif pnl <= -3:
+            losses += 1
+
+        eta = "1-2 hrs"
+
+        msg += (
+            f"{coin} {trade['direction']}\n"
+            f"PnL: {pnl:+.2f}%\n"
+            f"ETA TP: {eta}\n\n"
+        )
+
+    total = wins + losses
+    winrate = (wins / total * 100) if total > 0 else 0
+
+    msg += f"📊 Total PnL: {total_pnl:+.2f}%\n"
+    msg += f"✅ Winning Trades: {wins}\n"
+    msg += f"❌ Losing Trades: {losses}\n"
+    msg += f"🎯 Win Rate: {winrate:.1f}%\n"
+    msg += f"📌 Active Trades: {len(active_trades)}"
+
+    requests.post(
+        f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
+        json={"chat_id": CHAT_ID, "text": msg},
+        timeout=15
+    )
 
 def main():
-    global last_batch_time, last_river_time
+    global last_batch_time, last_river_time, last_hourly_time, last_pnl_update_time
     load_active_trades(); load_trade_history()
     threading.Thread(target=poll_telegram, daemon=True).start()
+    
+    requests.post(
+        f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
+        json={
+            "chat_id": CHAT_ID,
+            "text": "🚀 Bot Started 23 Successfully\n\n✅ Scanner Running\n✅ Queue Engine Running\n✅ River Engine Running\n✅ Telegram Connected"
+        },
+        timeout=15
+    )
     
     while True:
         try:
@@ -437,7 +534,7 @@ def main():
                     if confirmation_patterns:
                         pattern_text += " + " + " + ".join(confirmation_patterns[:2])
                     
-                    confirmation_bonus = min(len(found) * 2, 8)
+                    confirmation_bonus = min(len(found) * 0.5, 2)
                     boosted_score = min(best[1] + confirmation_bonus, 99)
 
                     if boosted_score >= MIN_SETUP_SCORE:
@@ -451,20 +548,37 @@ def main():
                             "direction": best[2],
                             "pattern": pattern_text,
                             "setup_score": boosted_score,
-                            "leverage": lev
+                            "leverage": lev,
+                            "scan_price": p
                         }
 
-                        if (coin not in hourly_queue or boosted_score > hourly_queue[coin]["setup_score"]):
+                        if (
+                            coin not in active_trades and
+                            coin not in pending_signals and
+                            (
+                                coin not in hourly_queue or
+                                boosted_score > hourly_queue[coin]["setup_score"]
+                            )
+                        ):
                             hourly_queue[coin] = new_setup
                 time.sleep(DELAY_BETWEEN_COINS)
             
-            check_active_trades(); send_hourly_report()
+            check_active_trades()
             
             now = time.time()
+            
+            if (now - last_hourly_time) >= 3600:
+                send_hourly_report()
+                last_hourly_time = now
+
+            if (now - last_pnl_update_time) >= 3600:
+                send_live_pnl_update()
+                last_pnl_update_time = now
+            
             if (now - last_batch_time) >= BATCH_INTERVAL:
                 send_hourly_batch()
                 
-            if (now - last_river_time) >= 1800:
+            if (now - last_river_time) >= RIVER_INTERVAL:
                 try:
                     if "RIVER" not in active_trades and "RIVER" not in pending_signals:
                         p_r = get_price("RIVERUSDT")
@@ -481,37 +595,30 @@ def main():
                             
                             f_r = unique_patterns
                             if f_r:
-                                # UPDATED MULTI-CONFIRMATION LOGIC FOR RIVER
                                 best_r = max(f_r, key=lambda x: x[1])
-
                                 confirmed_patterns_r = list(dict.fromkeys([x[0] for x in f_r]))
-
                                 primary_pattern_r = best_r[0]
-
-                                confirmation_patterns_r = [
-                                    pat for pat in confirmed_patterns_r
-                                    if pat != primary_pattern_r
-                                ]
+                                confirmation_patterns_r = [pat for pat in confirmed_patterns_r if pat != primary_pattern_r]
 
                                 pattern_text_r = primary_pattern_r
-
                                 if confirmation_patterns_r:
                                     pattern_text_r += " + " + " + ".join(confirmation_patterns_r[:2])
 
-                                confirmation_bonus_r = min(len(f_r) * 2, 8)
-
+                                confirmation_bonus_r = min(len(f_r) * 0.5, 2)
                                 boosted_score_r = min(best_r[1] + confirmation_bonus_r, 99)
 
-                                if boosted_score_r >= MIN_SETUP_SCORE:
+                                if boosted_score_r >= 82:
                                     atr_r = calculate_atr(k_r); atr_pct_r = (atr_r / p_r) * 100 if p_r > 0 else 0
                                     lev_r = get_dynamic_leverage("RIVERUSDT", atr_pct_r, boosted_score_r)
+                                    
                                     river_setup = {
                                         "coin": "RIVER",
                                         "symbol": "RIVERUSDT",
                                         "direction": best_r[2],
                                         "pattern": pattern_text_r,
                                         "setup_score": boosted_score_r,
-                                        "leverage": lev_r
+                                        "leverage": lev_r,
+                                        "scan_price": p_r
                                     }
                                     format_and_send(river_setup, "RIVER", True)
                     last_river_time = now
